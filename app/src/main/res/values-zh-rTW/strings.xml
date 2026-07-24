@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">綦桐AI轉站</string>
+    <string name="about_title">關於</string>
+    <string name="settings_title">設定</string>
+    <string name="settings">設定</string>
+    <string name="settings_desc">網關配置、開關控制</string>
+    <string name="language_settings">語言設定</string>
+    <string name="follow_system">跟隨系統</string>
+    <string name="chinese_simple">简体中文</string>
+    <string name="chinese_traditional_tw">繁體中文(台灣)</string>
+    <string name="chinese_traditional_hk">繁體中文(香港)</string>
+    <string name="english">English</string>
+    <string name="project_links">項目鏈接</string>
+    <string name="github_repo">GitHub 倉庫</string>
+    <string name="feedback">反饋問題</string>
+    <string name="community">社區</string>
+    <string name="qq_group">QQ 群</string>
+    <string name="contact_author">聯繫作者</string>
+    <string name="tech_stack">技術棧</string>
+    <string name="app_desc">多AI網頁自動化對話工具\n像真人一樣操作免費網頁AI，自動串聯多平台對話</string>
+    <string name="version">v1.0.0</string>
+    <string name="submit_issue">提交 Issue 或建議</string>
+    <string name="click_join_qq">點擊加入 QQ 交流群（群號: 1007488535）</string>
+    <string name="copyright">© 2026 綦桐網絡</string>
+    <string name="gateway_switch">AI 網關</string>
+    <string name="gateway_on">已開啟</string>
+    <string name="gateway_off">已關閉</string>
+    <string name="gateway_config">網關配置</string>
+    <string name="gateway_host">主機地址</string>
+    <string name="gateway_port">端口</string>
+    <string name="gateway_api_key">API Key</string>
+    <string name="gateway_status">網關狀態</string>
+    <string name="gateway_running">運行中</string>
+    <string name="gateway_stopped">已停止</string>
+    <string name="gateway_address">地址</string>
+    <string name="not_set">未設置</string>
+    <string name="show">顯示</string>
+    <string name="hide">隱藏</string>
+    <string name="back">返回</string>
+    <string name="running_status">運行狀態</string>
+</resources>

@@ -1,0 +1,32 @@
+{
+  "platforms": {
+    "doubao": {
+      "url": "https://www.doubao.com/chat",
+      "tag": "doubao",
+      "engine": "react_textarea",
+      "input": "textarea[data-testid='chat_input_input'], textarea[placeholder*='输入消息']",
+      "fillStrategy": "prototype_setter_plus_input_event",
+      "sendStrategy": "enter_then_button#flow-end-msg-send",
+      "sendButton": "#flow-end-msg-send, button[aria-label*='发送']",
+      "reply": ".message-bubble:last-child .markdown-body, [data-testid='message_text_content']:last-child",
+      "loading": ".loading-spinner, [aria-busy=true]",
+      "note": "发送按钮条件渲染，必须先填字再等400ms；不要走Slate逻辑",
+      "delays": {
+        "afterFillMs": [400, 800],
+        "afterSendMs": [600, 1200]
+      }
+    },
+    "yuanbao": {
+      "url": "https://yuanbao.tencent.com",
+      "tag": "yuanbao",
+      "engine": "slate_react",
+      "input": "[data-slate-editor]",
+      "fillStrategy": "fiber_editor_insertText_then_paste_fallback",
+      "sendStrategy": "pointer_event_then_enter",
+      "sendButton": "[aria-label*='发送'], [data-testid*='send']",
+      "reply": "[data-testid='message']:last-child, .chat-message:last-child",
+      "loading": "[data-testid*='loading'], .spin",
+      "note": "Slate + Shadow DOM，走 Fiber 反查 editor；与 doubao 完全隔离"
+    }
+  }
+}

@@ -1,0 +1,671 @@
+package com.qtwl.YitongAIzhuanzhan.ui.screens
+
+import android.annotation.SuppressLint
+import android.view.ViewGroup
+import android.webkit.*
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.qtwl.YitongAIzhuanzhan.BookmarkManager
+import com.qtwl.YitongAIzhuanzhan.JsInjector
+import com.qtwl.YitongAIzhuanzhan.WebViewManager
+import com.qtwl.YitongAIzhuanzhan.ui.components.GlassCard
+import com.qtwl.YitongAIzhuanzhan.ui.theme.*
+
+@SuppressLint("SetJavaScriptEnabled")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BrowserScreen(
+    onNavigateToAbout: () -> Unit
+) {
+    val isDark = MaterialTheme.colorScheme.background == GlassBackgroundDark
+    val context = LocalContext.current
+
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val onStateChange: () -> Unit = { refreshKey++ }
+
+    var urlInput by remember { mutableStateOf("") }
+    var showUrlBar by remember { mutableStateOf(false) }
+    var showTabSwitcher by remember { mutableStateOf(false) }
+    var showBookmarks by remember { mutableStateOf(false) }
+    var showAiDialog by remember { mutableStateOf(false) }
+    var showAiExtract by remember { mutableStateOf(false) }
+    var aiMessage by remember { mutableStateOf("") }
+    var extractedContent by remember { mutableStateOf("") }
+
+    // 确保至少有一个标签页
+    remember {
+        if (WebViewManager.getTabCount() == 0) {
+            WebViewManager.createTab(context)
+        }
+        true
+    }
+
+    LaunchedEffect(Unit) {
+        if (WebViewManager.getTabCount() > 0) {
+            refreshKey++
+        }
+    }
+
+    val currentTab = remember(refreshKey) { WebViewManager.getCurrentTab() }
+    val tabs = remember(refreshKey) { WebViewManager.getTabs() }
+    val currentIndex = remember(refreshKey) { WebViewManager.getCurrentIndex() }
+
+    Scaffold(
+        containerColor = Color.Transparent,
+        topBar = {
+            Column {
+                Surface(
+                    color = if (isDark) GlassBackgroundDark else GlassBackground,
+                    tonalElevation = 0.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { showTabSwitcher = !showTabSwitcher },
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Tab,
+                                contentDescription = "标签页",
+                                tint = if (isDark) AppleBlueLight else AppleBlue,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Spacer(Modifier.width(6.dp))
+
+                        Text(
+                            text = if (currentTab?.title?.isNotEmpty() == true) currentTab.title else "綦桐AI转站",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isDark) AppleLabelDark else AppleLabel,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
+                        )
+
+                        Text(
+                            text = "${currentIndex + 1}/${tabs.size}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel,
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+
+                        IconButton(
+                            onClick = onNavigateToAbout,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Info,
+                                contentDescription = "关于",
+                                tint = if (isDark) AppleBlueLight else AppleBlue,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+
+                Surface(
+                    color = if (isDark) GlassBackgroundDark else GlassBackground,
+                    tonalElevation = 0.dp
+                ) {
+                    GlassUrlBar(
+                        url = currentTab?.url ?: "",
+                        onUrlChange = { urlInput = it },
+                        onGo = {
+                            val finalUrl = if (urlInput.startsWith("http://") || urlInput.startsWith("https://")) urlInput
+                            else "https://$urlInput"
+                            currentTab?.webView?.loadUrl(finalUrl)
+                            showUrlBar = false
+                        },
+                        isDark = isDark,
+                        showUrlBar = showUrlBar,
+                        onToggleUrlBar = { showUrlBar = !showUrlBar }
+                    )
+                }
+                // 编辑URL时留出键盘空间
+                if (showUrlBar) {
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (currentTab?.isLoading == true) {
+                    LinearProgressIndicator(
+                        progress = { (currentTab.progress) / 100f },
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        color = AppleBlue,
+                        trackColor = Color.Transparent,
+                    )
+                }
+            }
+        },
+        bottomBar = {
+            BottomNavigationBar(
+                canGoBack = currentTab?.canGoBack ?: false,
+                canGoForward = currentTab?.canGoForward ?: false,
+                isLoading = currentTab?.isLoading ?: false,
+                onBack = { currentTab?.webView?.goBack() },
+                onForward = { currentTab?.webView?.goForward() },
+                onRefresh = { currentTab?.webView?.reload() },
+                onStop = { currentTab?.webView?.stopLoading() },
+                onHome = { currentTab?.webView?.loadUrl("https://www.doubao.com") },
+                onNewTab = {
+                    WebViewManager.createTab(context)
+                    refreshKey++
+                },
+                onBookmarks = { showBookmarks = !showBookmarks },
+                onAiDialog = { showAiDialog = true },
+                isDark = isDark
+            )
+        }
+    ) { padding ->
+        Box(
+            modifier = Modifier.fillMaxSize().padding(padding)
+                .background(if (isDark) GlassBackgroundDark else GlassBackground)
+        ) {
+            // 顶部渐变
+            Box(
+                modifier = Modifier.fillMaxWidth().height(200.dp)
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                if (isDark) AppleBlue.copy(alpha = 0.05f) else AppleBlue.copy(alpha = 0.03f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+
+            // WebView 内容 - 占满整个空间
+            currentTab?.let { tab ->
+                key(tab.id) {
+                    AndroidView(
+                        factory = { ctx ->
+                            // 复用已有的 WebView，避免重复创建
+                            tab.webView?.let { existingWv ->
+                                existingWv.loadUrl(tab.url)
+                                return@AndroidView existingWv
+                            }
+                            val wv = WebView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.loadWithOverviewMode = true
+                                settings.useWideViewPort = true
+                                settings.builtInZoomControls = true
+                                settings.displayZoomControls = false
+                                settings.setSupportZoom(true)
+                                settings.allowFileAccess = false
+                                settings.setSupportMultipleWindows(true)
+                                settings.javaScriptCanOpenWindowsAutomatically = true
+                                settings.mediaPlaybackRequiresUserGesture = false
+                                settings.userAgentString = com.qtwl.YitongAIzhuanzhan.USER_AGENT_DESKTOP
+                                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                                settings.databaseEnabled = true
+                                settings.allowContentAccess = true
+                                webViewClient = object : android.webkit.WebViewClient() {
+                                    override fun onPageStarted(view: android.webkit.WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                        tab.isLoading = true
+                                        url?.let { tab.url = it }
+                                        onStateChange()
+                                    }
+                                    override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                                        tab.isLoading = false
+                                        tab.title = view?.title ?: ""
+                                        tab.canGoBack = view?.canGoBack() ?: false
+                                        tab.canGoForward = view?.canGoForward() ?: false
+                                        onStateChange()
+                                    }
+                                    override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                                        return false
+                                    }
+                                }
+                                webChromeClient = object : android.webkit.WebChromeClient() {
+                                    override fun onProgressChanged(view: android.webkit.WebView?, newProgress: Int) {
+                                        tab.progress = newProgress
+                                        if (newProgress == 100) tab.isLoading = false
+                                        onStateChange()
+                                    }
+                                    override fun onReceivedTitle(view: android.webkit.WebView?, title: String?) {
+                                        tab.title = title ?: ""
+                                        onStateChange()
+                                    }
+                                }
+                                CookieManager.getInstance().setAcceptCookie(true)
+                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                                CookieManager.getInstance().flush()
+                            }
+                            tab.webView = wv
+                            if (tab.url.isNotEmpty()) {
+                                wv.loadUrl(tab.url)
+                            }
+                            wv
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+
+            // 加载指示器
+            if (currentTab?.isLoading == true && (currentTab.progress) < 30) {
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.Center).size(32.dp),
+                    color = AppleBlue,
+                    strokeWidth = 2.dp
+                )
+            }
+
+            // 标签页切换器 - 全屏覆盖
+            if (showTabSwitcher) {
+                TabSwitcherOverlay(
+                    tabs = tabs, currentIndex = currentIndex, isDark = isDark,
+                    onSwitchTab = { index ->
+                        WebViewManager.switchTab(index); showTabSwitcher = false; refreshKey++
+                    },
+                    onCloseTab = { index ->
+                        WebViewManager.closeTab(index); refreshKey++
+                    },
+                    onNewTab = {
+                        WebViewManager.createTab(context)
+                        showTabSwitcher = false; refreshKey++
+                    },
+                    onDismiss = { showTabSwitcher = false }
+                )
+            }
+
+            // 收藏夹覆盖层 - 全屏覆盖
+            if (showBookmarks) {
+                BookmarkOverlay(
+                    bookmarks = BookmarkManager.getBookmarks(context), isDark = isDark,
+                    onOpen = { bookmark ->
+                        WebViewManager.createTab(context, bookmark.url)
+                        showBookmarks = false; refreshKey++
+                    },
+                    onAdd = {
+                        currentTab?.let { tab ->
+                            BookmarkManager.addBookmark(context, tab.title.ifEmpty { "新标签页" }, tab.url)
+                            Toast.makeText(context, "已收藏", Toast.LENGTH_SHORT).show()
+                        }
+                        showBookmarks = false
+                    },
+                    onRemove = { bookmark ->
+                        BookmarkManager.removeBookmark(context, bookmark.url)
+                        Toast.makeText(context, "已移除: ${bookmark.name}", Toast.LENGTH_SHORT).show()
+                        refreshKey++
+                    },
+                    onReset = {
+                        BookmarkManager.resetToDefault(context)
+                        Toast.makeText(context, "已恢复默认收藏", Toast.LENGTH_SHORT).show()
+                        refreshKey++
+                    },
+                    onDismiss = { showBookmarks = false }
+                )
+            }
+
+            // AI 注入对话框
+            if (showAiDialog) {
+                AiSendDialog(
+                    message = aiMessage,
+                    onMessageChange = { aiMessage = it },
+                    onSend = {
+                        currentTab?.webView?.let { wv ->
+                            JsInjector.autoSendMessage(wv, aiMessage) { success, detail ->
+                                Toast.makeText(context, detail, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        showAiDialog = false
+                    },
+                    onExtract = {
+                        currentTab?.webView?.let { wv ->
+                            JsInjector.extractChat(wv) { result ->
+                                extractedContent = result; showAiExtract = true
+                            }
+                        }
+                        showAiDialog = false
+                    },
+                    onDiagnose = {
+                        currentTab?.webView?.let { wv ->
+                            JsInjector.injectJs(wv, JsInjector.getDiagnoseScript()) { result ->
+                                extractedContent = result; showAiExtract = true
+                            }
+                        }
+                        showAiDialog = false
+                    },
+                    onDismiss = { showAiDialog = false }, isDark = isDark
+                )
+            }
+
+            // 提取结果对话框
+            if (showAiExtract) {
+                AiResultDialog(content = extractedContent, onDismiss = { showAiExtract = false }, isDark = isDark)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabSwitcherOverlay(
+    tabs: List<com.qtwl.YitongAIzhuanzhan.WebViewTab>,
+    currentIndex: Int, isDark: Boolean,
+    onSwitchTab: (Int) -> Unit, onCloseTab: (Int) -> Unit,
+    onNewTab: () -> Unit, onDismiss: () -> Unit
+) {
+    val scrollState = rememberScrollState()
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(onClick = onDismiss),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(top = 100.dp, start = 16.dp, end = 16.dp)
+                .heightIn(max = 500.dp).verticalScroll(scrollState).clickable(enabled = false) {},
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Button(onClick = onNewTab, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue),
+                shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp)); Text("新建标签页")
+            }
+            tabs.forEachIndexed { index, tab ->
+                GlassCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onSwitchTab(index) },
+                    shape = RoundedCornerShape(12.dp), elevation = if (index == currentIndex) 4.dp else 1.dp) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(tab.title.ifEmpty { "新标签页" }, style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (index == currentIndex) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isDark) AppleLabelDark else AppleLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(tab.url, style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (tabs.size > 1) {
+                            IconButton(onClick = { onCloseTab(index) }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Filled.Close, contentDescription = "关闭", tint = if (isDark) AppleGray2 else AppleGray, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlassUrlBar(
+    url: String, onUrlChange: (String) -> Unit, onGo: () -> Unit,
+    isDark: Boolean, showUrlBar: Boolean, onToggleUrlBar: () -> Unit
+) {
+    Surface(
+        color = if (isDark) GlassBackgroundDark else GlassBackground,
+        tonalElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Outlined.Lock, contentDescription = null, modifier = Modifier.size(14.dp), tint = AppleGreen)
+            Spacer(Modifier.width(6.dp))
+            if (showUrlBar) {
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = onUrlChange,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AppleBlue.copy(alpha = 0.5f),
+                        unfocusedBorderColor = if (isDark) GlassBorderDark else GlassBorder,
+                        cursorColor = AppleBlue,
+                        focusedTextColor = if (isDark) AppleLabelDark else AppleLabel,
+                        unfocusedTextColor = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                IconButton(onClick = onGo, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.ArrowForward, contentDescription = "前往", tint = AppleBlue, modifier = Modifier.size(18.dp))
+                }
+            } else {
+                Text(
+                    text = url,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                        .background(if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark)
+                        .clickable { onToggleUrlBar() }
+                        .padding(horizontal = 10.dp, vertical = 10.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                IconButton(onClick = onToggleUrlBar, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Outlined.Edit, contentDescription = "编辑", tint = if (isDark) AppleGray2 else AppleGray, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BottomNavigationBar(
+    canGoBack: Boolean, canGoForward: Boolean, isLoading: Boolean,
+    onBack: () -> Unit, onForward: () -> Unit, onRefresh: () -> Unit, onStop: () -> Unit,
+    onHome: () -> Unit, onNewTab: () -> Unit,
+    onBookmarks: () -> Unit, onAiDialog: () -> Unit,
+    isDark: Boolean
+) {
+    val scrollState = rememberScrollState()
+    Surface(color = if (isDark) GlassBackgroundDark else GlassBackground, tonalElevation = 0.dp, shadowElevation = 8.dp) {
+        Row(
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp)
+                .horizontalScroll(scrollState),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NavButton(Icons.Filled.ArrowBack, canGoBack, onBack, isDark)
+            NavButton(Icons.Filled.ArrowForward, canGoForward, onForward, isDark)
+            NavButton(if (isLoading) Icons.Filled.Close else Icons.Filled.Refresh, true, if (isLoading) onStop else onRefresh, isDark, !isLoading)
+            NavButton(Icons.Filled.Home, true, onHome, isDark)
+            NavButton(Icons.Filled.Add, true, onNewTab, isDark, true)
+            // 分隔线
+            Box(modifier = Modifier.width(1.dp).height(24.dp).background(if (isDark) GlassBorderDark else GlassBorder, RoundedCornerShape(1.dp)))
+            // 收藏按钮
+            NavButton(Icons.Outlined.Bookmarks, true, onBookmarks, isDark)
+            // AI 注入按钮
+            NavButton(Icons.Filled.Send, true, onAiDialog, isDark, true)
+        }
+    }
+}
+
+@Composable
+private fun NavButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean, onClick: () -> Unit, isDark: Boolean, isHighlight: Boolean = false
+) {
+    val bgColor = when {
+        isHighlight -> if (isDark) AppleBlue.copy(alpha = 0.15f) else AppleBlue.copy(alpha = 0.1f)
+        else -> Color.Transparent
+    }
+    val iconColor = when {
+        !enabled -> if (isDark) AppleGray.copy(alpha = 0.3f) else AppleGray2.copy(alpha = 0.3f)
+        isHighlight -> AppleBlue
+        else -> if (isDark) AppleLabelDark else AppleLabel
+    }
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(42.dp).clip(CircleShape).background(bgColor)) {
+        Icon(imageVector = icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun AiSendDialog(
+    message: String, onMessageChange: (String) -> Unit,
+    onSend: () -> Unit, onExtract: () -> Unit, onDiagnose: () -> Unit,
+    onDismiss: () -> Unit, isDark: Boolean
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = if (isDark) GlassBackgroundDark else GlassBackground,
+        titleContentColor = if (isDark) AppleLabelDark else AppleLabel,
+        textContentColor = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.SmartToy, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp)); Text("AI 注入", fontWeight = FontWeight.SemiBold)
+            }
+        },
+        text = {
+            Column {
+                OutlinedTextField(value = message, onValueChange = onMessageChange,
+                    modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
+                    placeholder = { Text("输入要发送的消息...") }, minLines = 2, maxLines = 4,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AppleBlue.copy(alpha = 0.5f),
+                        unfocusedBorderColor = if (isDark) GlassBorderDark else GlassBorder,
+                        cursorColor = AppleBlue,
+                        focusedTextColor = if (isDark) AppleLabelDark else AppleLabel,
+                        unfocusedTextColor = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel
+                    ), shape = RoundedCornerShape(10.dp))
+                Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(onClick = onExtract) {
+                        Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp)); Text("提取对话", style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(onClick = onDiagnose) {
+                        Icon(Icons.Outlined.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp)); Text("诊断页面", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onSend, enabled = message.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = AppleBlue), shape = RoundedCornerShape(10.dp)) {
+                Icon(Icons.Filled.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp)); Text("发送")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+@Composable
+private fun AiResultDialog(content: String, onDismiss: () -> Unit, isDark: Boolean) {
+    val scrollState = rememberScrollState()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = if (isDark) GlassBackgroundDark else GlassBackground,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.DataObject, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp)); Text("提取结果", fontWeight = FontWeight.SemiBold)
+            }
+        },
+        text = {
+            Box(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(scrollState)
+                .background(if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark, RoundedCornerShape(8.dp)).padding(12.dp)) {
+                Text(text = content.ifEmpty { "无数据" }, style = MaterialTheme.typography.bodySmall,
+                    color = if (isDark) AppleLabelDark else AppleLabel)
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue),
+                shape = RoundedCornerShape(10.dp)) { Text("关闭") }
+        }
+    )
+}
+
+@Composable
+private fun BookmarkOverlay(
+    bookmarks: List<com.qtwl.YitongAIzhuanzhan.Bookmark>,
+    isDark: Boolean,
+    onOpen: (com.qtwl.YitongAIzhuanzhan.Bookmark) -> Unit,
+    onAdd: () -> Unit,
+    onRemove: (com.qtwl.YitongAIzhuanzhan.Bookmark) -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val scrollState = rememberScrollState()
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(onClick = onDismiss),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(top = 100.dp, start = 16.dp, end = 16.dp)
+                .heightIn(max = 500.dp).verticalScroll(scrollState).clickable(enabled = false) {},
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("收藏夹", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                    color = if (isDark) AppleLabelDark else AppleLabel)
+                TextButton(onClick = onAdd) {
+                    Icon(Icons.Outlined.BookmarkAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp)); Text("收藏当前", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            bookmarks.forEach { bookmark ->
+                GlassCard(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { onOpen(bookmark) },
+                    shape = RoundedCornerShape(10.dp), elevation = 1.dp) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Web, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(bookmark.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
+                                color = if (isDark) AppleLabelDark else AppleLabel)
+                            Text(bookmark.url, style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { onRemove(bookmark) }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "删除", tint = if (isDark) AppleGray2 else AppleGray, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onReset) {
+                Icon(Icons.Outlined.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp)); Text("恢复默认", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
