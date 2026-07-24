@@ -46,11 +46,17 @@ android {
     }
 }
 
-// Force use of ARM64 binaries for AAPT2 in Proot environment
-configurations.all {
-    resolutionStrategy.eachDependency {
-        if (requested.group == "com.android.tools.build" && requested.name == "aapt2") {
-            useTarget("com.android.tools.build:aapt2:${'$'}{requested.version}:linux-aarch64")
+// Use the Linux ARM64 AAPT2 artifact only in ARM64 Linux/Proot environments.
+// Windows, macOS, and x86_64 Linux must use AGP's native platform artifact.
+val isLinuxArm64 = System.getProperty("os.name").startsWith("Linux", ignoreCase = true) &&
+    System.getProperty("os.arch").lowercase() in setOf("aarch64", "arm64")
+
+if (isLinuxArm64) {
+    configurations.all {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "com.android.tools.build" && requested.name == "aapt2") {
+                useTarget("com.android.tools.build:aapt2:${'$'}{requested.version}:linux-aarch64")
+            }
         }
     }
 }

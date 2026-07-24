@@ -39,4 +39,45 @@
     <string name="hide">隱藏</string>
     <string name="back">返回</string>
     <string name="running_status">運行狀態</string>
+
+    <!-- Browser and bookmark UI -->
+    <string name="bookmarks_title">收藏管理</string>
+    <string name="bookmarks_list">收藏清單</string>
+    <string name="bookmark_count">%1$d 個收藏</string>
+    <string name="restore_default_bookmarks">還原預設收藏</string>
+    <string name="restore_default_bookmarks_desc">重設為預設 AI 平台清單</string>
+    <string name="restored_default">已還原預設</string>
+    <string name="qq_group_number_clip_label">QQ 群組號碼</string>
+    <string name="qq_group_copied">群組號碼已複製</string>
+    <string name="add_bookmark">新增收藏</string>
+    <string name="restore_default">還原預設</string>
+    <string name="no_bookmarks">尚無收藏</string>
+    <string name="bookmarks_total">共 %1$d 個收藏</string>
+    <string name="edit">編輯</string>
+    <string name="delete">刪除</string>
+    <string name="edit_bookmark">編輯收藏</string>
+    <string name="bookmark_name">名稱</string>
+    <string name="website">網址</string>
+    <string name="save">儲存</string>
+    <string name="cancel">取消</string>
+    <string name="tabs">分頁</string>
+    <string name="about">關於</string>
+    <string name="new_tab">新分頁</string>
+    <string name="bookmarked">已加入收藏</string>
+    <string name="removed_bookmark">已移除：%1$s</string>
+    <string name="default_bookmarks_restored">已還原預設收藏</string>
+    <string name="close">關閉</string>
+    <string name="go">前往</string>
+    <string name="browser_settings">瀏覽器設定</string>
+    <string name="text_zoom">字體縮放</string>
+    <string name="default_user_agent">預設 UA</string>
+    <string name="ai_injection">AI 注入</string>
+    <string name="message_hint">輸入要傳送的訊息…</string>
+    <string name="extract_chat">擷取對話</string>
+    <string name="diagnose_page">診斷頁面</string>
+    <string name="send">傳送</string>
+    <string name="extract_result">擷取結果</string>
+    <string name="no_data">無資料</string>
+    <string name="bookmarks">收藏夾</string>
+    <string name="bookmark_current">收藏目前頁面</string>
 </resources>

@@ -1,5 +1,7 @@
 # 🔄 綦桐AI转站
 
+[English documentation](README_EN.md)
+
 > **多AI网页自动化对话工具** — 像真人一样操作免费网页AI，自动串联多平台对话
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.10-purple)](https://kotlinlang.org)

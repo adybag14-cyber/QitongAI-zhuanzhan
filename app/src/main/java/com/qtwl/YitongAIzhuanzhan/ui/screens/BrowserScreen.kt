@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.qtwl.YitongAIzhuanzhan.BookmarkManager
 import com.qtwl.YitongAIzhuanzhan.JsInjector
+import com.qtwl.YitongAIzhuanzhan.R
 import com.qtwl.YitongAIzhuanzhan.WebViewManager
 import com.qtwl.YitongAIzhuanzhan.ui.components.GlassCard
 import com.qtwl.YitongAIzhuanzhan.ui.theme.*
@@ -99,7 +101,7 @@ fun BrowserScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Tab,
-                                contentDescription = "标签页",
+                                contentDescription = stringResource(R.string.tabs),
                                 tint = if (isDark) AppleBlueLight else AppleBlue,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -108,7 +110,7 @@ fun BrowserScreen(
                         Spacer(Modifier.width(6.dp))
 
                         Text(
-                            text = if (currentTab?.title?.isNotEmpty() == true) currentTab.title else "綦桐AI转站",
+                            text = if (currentTab?.title?.isNotEmpty() == true) currentTab.title else stringResource(R.string.app_name),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = if (isDark) AppleLabelDark else AppleLabel,
@@ -135,7 +137,7 @@ fun BrowserScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Info,
-                                contentDescription = "关于",
+                                contentDescription = stringResource(R.string.about),
                                 tint = if (isDark) AppleBlueLight else AppleBlue,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -324,19 +326,19 @@ fun BrowserScreen(
                     },
                     onAdd = {
                         currentTab?.let { tab ->
-                            BookmarkManager.addBookmark(context, tab.title.ifEmpty { "新标签页" }, tab.url)
-                            Toast.makeText(context, "已收藏", Toast.LENGTH_SHORT).show()
+                            BookmarkManager.addBookmark(context, tab.title.ifEmpty { context.getString(R.string.new_tab) }, tab.url)
+                            Toast.makeText(context, context.getString(R.string.bookmarked), Toast.LENGTH_SHORT).show()
                         }
                         showBookmarks = false
                     },
                     onRemove = { bookmark ->
                         BookmarkManager.removeBookmark(context, bookmark.url)
-                        Toast.makeText(context, "已移除: ${bookmark.name}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.removed_bookmark, bookmark.name), Toast.LENGTH_SHORT).show()
                         refreshKey++
                     },
                     onReset = {
                         BookmarkManager.resetToDefault(context)
-                        Toast.makeText(context, "已恢复默认收藏", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.default_bookmarks_restored), Toast.LENGTH_SHORT).show()
                         refreshKey++
                     },
                     onDismiss = { showBookmarks = false }
@@ -404,14 +406,14 @@ private fun TabSwitcherOverlay(
             Button(onClick = onNewTab, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue),
                 shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp)); Text("新建标签页")
+                Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.new_tab))
             }
             tabs.forEachIndexed { index, tab ->
                 GlassCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onSwitchTab(index) },
                     shape = RoundedCornerShape(12.dp), elevation = if (index == currentIndex) 4.dp else 1.dp) {
                     Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(tab.title.ifEmpty { "新标签页" }, style = MaterialTheme.typography.bodyMedium,
+                            Text(tab.title.ifEmpty { stringResource(R.string.new_tab) }, style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (index == currentIndex) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isDark) AppleLabelDark else AppleLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(tab.url, style = MaterialTheme.typography.bodySmall,
@@ -419,7 +421,7 @@ private fun TabSwitcherOverlay(
                         }
                         if (tabs.size > 1) {
                             IconButton(onClick = { onCloseTab(index) }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Filled.Close, contentDescription = "关闭", tint = if (isDark) AppleGray2 else AppleGray, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close), tint = if (isDark) AppleGray2 else AppleGray, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
@@ -462,7 +464,7 @@ private fun GlassUrlBar(
                 )
                 Spacer(Modifier.width(6.dp))
                 IconButton(onClick = onGo, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Filled.ArrowForward, contentDescription = "前往", tint = AppleBlue, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Filled.ArrowForward, contentDescription = stringResource(R.string.go), tint = AppleBlue, modifier = Modifier.size(18.dp))
                 }
             } else {
                 Text(
@@ -478,7 +480,7 @@ private fun GlassUrlBar(
                 )
                 Spacer(Modifier.width(4.dp))
                 IconButton(onClick = onToggleUrlBar, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Outlined.Edit, contentDescription = "编辑", tint = if (isDark) AppleGray2 else AppleGray, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Outlined.Edit, contentDescription = stringResource(R.string.edit), tint = if (isDark) AppleGray2 else AppleGray, modifier = Modifier.size(16.dp))
                 }
             }
         }
@@ -549,14 +551,14 @@ private fun AiSendDialog(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.SmartToy, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp)); Text("AI 注入", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.ai_injection), fontWeight = FontWeight.SemiBold)
             }
         },
         text = {
             Column {
                 OutlinedTextField(value = message, onValueChange = onMessageChange,
                     modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
-                    placeholder = { Text("输入要发送的消息...") }, minLines = 2, maxLines = 4,
+                    placeholder = { Text(stringResource(R.string.message_hint)) }, minLines = 2, maxLines = 4,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AppleBlue.copy(alpha = 0.5f),
                         unfocusedBorderColor = if (isDark) GlassBorderDark else GlassBorder,
@@ -568,11 +570,11 @@ private fun AiSendDialog(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     TextButton(onClick = onExtract) {
                         Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp)); Text("提取对话", style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.extract_chat), style = MaterialTheme.typography.bodySmall)
                     }
                     TextButton(onClick = onDiagnose) {
                         Icon(Icons.Outlined.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp)); Text("诊断页面", style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.diagnose_page), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -581,10 +583,10 @@ private fun AiSendDialog(
             Button(onClick = onSend, enabled = message.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = AppleBlue), shape = RoundedCornerShape(10.dp)) {
                 Icon(Icons.Filled.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp)); Text("发送")
+                Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.send))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )
 }
 
@@ -597,19 +599,19 @@ private fun AiResultDialog(content: String, onDismiss: () -> Unit, isDark: Boole
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.DataObject, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp)); Text("提取结果", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.extract_result), fontWeight = FontWeight.SemiBold)
             }
         },
         text = {
             Box(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(scrollState)
                 .background(if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark, RoundedCornerShape(8.dp)).padding(12.dp)) {
-                Text(text = content.ifEmpty { "无数据" }, style = MaterialTheme.typography.bodySmall,
+                Text(text = content.ifEmpty { stringResource(R.string.no_data) }, style = MaterialTheme.typography.bodySmall,
                     color = if (isDark) AppleLabelDark else AppleLabel)
             }
         },
         confirmButton = {
             Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue),
-                shape = RoundedCornerShape(10.dp)) { Text("关闭") }
+                shape = RoundedCornerShape(10.dp)) { Text(stringResource(R.string.close)) }
         }
     )
 }
@@ -636,11 +638,11 @@ private fun BookmarkOverlay(
         ) {
             Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("收藏夹", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                Text(stringResource(R.string.bookmarks), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                     color = if (isDark) AppleLabelDark else AppleLabel)
                 TextButton(onClick = onAdd) {
                     Icon(Icons.Outlined.BookmarkAdd, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp)); Text("收藏当前", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.bookmark_current), style = MaterialTheme.typography.bodySmall)
                 }
             }
             bookmarks.forEach { bookmark ->
@@ -656,7 +658,7 @@ private fun BookmarkOverlay(
                                 color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         IconButton(onClick = { onRemove(bookmark) }, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Outlined.Delete, contentDescription = "删除", tint = if (isDark) AppleGray2 else AppleGray, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.delete), tint = if (isDark) AppleGray2 else AppleGray, modifier = Modifier.size(16.dp))
                         }
                     }
                 }
@@ -664,7 +666,7 @@ private fun BookmarkOverlay(
             Spacer(Modifier.height(8.dp))
             TextButton(onClick = onReset) {
                 Icon(Icons.Outlined.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp)); Text("恢复默认", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.restore_default), style = MaterialTheme.typography.bodySmall)
             }
         }
     }

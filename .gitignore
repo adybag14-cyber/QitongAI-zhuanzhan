@@ -18,5 +18,3 @@ qitong.jks
 app/build/
 .gradle/
 .kotlin/
-gradle.properties
-gradlew.bat
