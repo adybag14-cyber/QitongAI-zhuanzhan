@@ -1,0 +1,189 @@
+﻿name: Native ARM64 APK build and release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: arm64-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-arm64:
+    name: Build on native Ubuntu ARM64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Record native runner and Android SDK details
+        shell: bash
+        run: |
+          set -euxo pipefail
+          uname -a
+          uname -m | tee runner-architecture.txt
+          test "$(uname -m)" = "aarch64"
+          lscpu
+          java -version
+          echo "ANDROID_HOME=${ANDROID_HOME:-}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
+          test -n "${ANDROID_HOME:-}"
+          test -d "$ANDROID_HOME/platforms/android-35"
+          test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version || true
+
+      - name: Build unsigned release and installable debug APKs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace \
+            clean \
+            :app:testDebugUnitTest \
+            :app:lintDebug \
+            :app:assembleRelease \
+            :app:assembleDebug \
+            :app:assembleDebugAndroidTest
+
+      - name: Verify signing state and packaged ABI
+        id: package
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          DEBUG="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+
+          test -f "$UNSIGNED"
+          test -f "$DEBUG"
+
+          if "$APKSIGNER" verify --verbose "$UNSIGNED"; then
+            echo "Release APK unexpectedly contains a signature" >&2
+            exit 1
+          else
+            echo "Confirmed: release APK is unsigned"
+          fi
+
+          "$APKSIGNER" verify --verbose --print-certs "$DEBUG" | tee debug-signing-certificate.txt
+
+          python3 - "$UNSIGNED" "$DEBUG" <<'PY'
+          import sys
+          import zipfile
+
+          for apk in sys.argv[1:]:
+              with zipfile.ZipFile(apk) as archive:
+                  native = sorted(name for name in archive.namelist() if name.startswith("lib/") and name.endswith(".so"))
+              print(f"{apk}: {len(native)} native libraries")
+              for name in native:
+                  print(f"  {name}")
+              if not native:
+                  raise SystemExit(f"{apk}: expected at least one packaged native library")
+              invalid = [name for name in native if not name.startswith("lib/arm64-v8a/")]
+              if invalid:
+                  raise SystemExit(f"{apk}: unexpected non-arm64 ABI entries: {invalid}")
+          PY
+
+          VERSION_NAME=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n1)
+          VERSION_CODE=$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n1)
+          test -n "$VERSION_NAME"
+          test -n "$VERSION_CODE"
+
+          mkdir -p release-assets
+          UNSIGNED_OUT="release-assets/QitongAI-${VERSION_NAME}-arm64-v8a-unsigned.apk"
+          DEBUG_OUT="release-assets/QitongAI-${VERSION_NAME}-arm64-v8a-debug-signed.apk"
+          cp "$UNSIGNED" "$UNSIGNED_OUT"
+          cp "$DEBUG" "$DEBUG_OUT"
+
+          (
+            cd release-assets
+            sha256sum *.apk > SHA256SUMS.txt
+          )
+
+          cat > release-assets/BUILD-INFO.txt <<EOF
+          Repository: $GITHUB_REPOSITORY
+          Commit: $GITHUB_SHA
+          Git ref: $GITHUB_REF
+          Runner OS: $RUNNER_OS
+          Runner architecture reported by GitHub: $RUNNER_ARCH
+          uname -m: $(uname -m)
+          Android target ABI: arm64-v8a only
+          App version name: $VERSION_NAME
+          App version code: $VERSION_CODE
+          Java: $(java -version 2>&1 | head -n1)
+
+          QitongAI-${VERSION_NAME}-arm64-v8a-unsigned.apk
+            Unsigned release build. This cannot be installed directly on a normal Android phone.
+
+          QitongAI-${VERSION_NAME}-arm64-v8a-debug-signed.apk
+            Installable test build signed by the temporary GitHub runner debug key.
+            A later workflow run may use a different debug key; uninstall the previous test build before installing an update if Android reports a signature mismatch.
+          EOF
+
+          cp debug-signing-certificate.txt release-assets/
+
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QitongAI-${{ steps.package.outputs.version_name }}-native-arm64-apks
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub release for tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.package.outputs.version_name }}
+          VERSION_CODE: ${{ steps.package.outputs.version_code }}
+        run: |
+          set -euxo pipefail
+          cat > release-notes.md <<EOF
+          ## QiTong AI Station ${VERSION_NAME}
+
+          Built on GitHub's native Linux ARM64 hosted runner: ubuntu-24.04-arm, with uname -m reporting aarch64.
+
+          ### Phone testing
+
+          Download **QitongAI-${VERSION_NAME}-arm64-v8a-debug-signed.apk** to install and test on an ARM64 Android phone.
+
+          The requested **QitongAI-${VERSION_NAME}-arm64-v8a-unsigned.apk** is also attached, but Android will not install an unsigned APK until it is signed.
+
+          ### Build properties
+
+          - App version code: ${VERSION_CODE}
+          - Packaged ABI: arm64-v8a only
+          - Release APK: verified unsigned
+          - Debug APK: verified signed with the workflow runner's temporary debug certificate
+          - JVM unit tests: passed
+          - Android lint: passed
+          - Release and debug assembly: passed
+
+          Verify downloads with SHA256SUMS.txt. Detailed runner and signing information is in BUILD-INFO.txt and debug-signing-certificate.txt.
+          EOF
+
+          gh release create "$GITHUB_REF_NAME" \
+            release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "QiTong AI Station ${VERSION_NAME} ARM64 test build" \
+            --notes-file release-notes.md
+
