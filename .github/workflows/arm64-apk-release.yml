@@ -1,4 +1,4 @@
-name: Native ARM64 APK build and release
+name: ARM64 runner probe and APK release
 
 on:
   workflow_dispatch:
@@ -13,10 +13,116 @@ concurrency:
   group: arm64-apk-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  CMDLINE_TOOLS_URL: https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip
+  CMDLINE_TOOLS_SHA256: 4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583
+
 jobs:
-  build-arm64:
-    name: Build on native Ubuntu ARM64
+  native-arm64-probe:
+    name: Probe build on native Ubuntu ARM64
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    outputs:
+      build_result: ${{ steps.probe-summary.outputs.build_result }}
+      build_exit_code: ${{ steps.probe-summary.outputs.build_exit_code }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Install Android SDK 35 for the ARM64 probe
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(uname -m)" = "aarch64"
+          uname -a | tee native-arm64-uname.txt
+          lscpu | tee native-arm64-cpu.txt
+          java -version 2>&1 | tee native-arm64-java.txt
+
+          SDK_ROOT="$RUNNER_TEMP/android-sdk"
+          TOOLS_ZIP="$RUNNER_TEMP/android-command-line-tools.zip"
+          EXTRACT_ROOT="$RUNNER_TEMP/android-command-line-tools"
+          rm -rf "$SDK_ROOT" "$EXTRACT_ROOT"
+          mkdir -p "$SDK_ROOT/cmdline-tools" "$EXTRACT_ROOT"
+
+          curl --fail --location --retry 3 --output "$TOOLS_ZIP" "$CMDLINE_TOOLS_URL"
+          echo "$CMDLINE_TOOLS_SHA256  $TOOLS_ZIP" | sha256sum --check --strict
+          unzip -q "$TOOLS_ZIP" -d "$EXTRACT_ROOT"
+          mv "$EXTRACT_ROOT/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          set +o pipefail
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null
+          LICENSE_EXIT=${PIPESTATUS[1]}
+          set -o pipefail
+          test "$LICENSE_EXIT" -eq 0
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Attempt complete debug build natively on ARM64
+        id: native-build
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace clean :app:assembleDebug 2>&1 | tee native-arm64-gradle.log
+          BUILD_EXIT=${PIPESTATUS[0]}
+          echo "build_exit_code=$BUILD_EXIT" >> "$GITHUB_OUTPUT"
+          exit "$BUILD_EXIT"
+
+      - name: Summarise native ARM64 result
+        id: probe-summary
+        if: always()
+        shell: bash
+        env:
+          STEP_OUTCOME: ${{ steps.native-build.outcome }}
+          BUILD_EXIT_CODE: ${{ steps.native-build.outputs.build_exit_code }}
+        run: |
+          set -euxo pipefail
+          RESULT="$STEP_OUTCOME"
+          EXIT_CODE="${BUILD_EXIT_CODE:-unknown}"
+          {
+            echo "runner_label=ubuntu-24.04-arm"
+            echo "uname_m=$(uname -m)"
+            echo "build_result=$RESULT"
+            echo "build_exit_code=$EXIT_CODE"
+            echo
+            echo "Relevant build output:"
+            grep -E -i -C 2 'AAPT2|aapt2|Syntax error|BUILD FAILED|BUILD SUCCESSFUL' native-arm64-gradle.log | tail -n 120 || true
+          } | tee native-arm64-result.txt
+          echo "build_result=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "build_exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload native ARM64 probe logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-arm64-build-probe
+          path: |
+            native-arm64-uname.txt
+            native-arm64-cpu.txt
+            native-arm64-java.txt
+            native-arm64-gradle.log
+            native-arm64-result.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  package-arm64-apks:
+    name: Package ARM64-only APKs on Ubuntu x64
+    needs: native-arm64-probe
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
 
     steps:
@@ -30,43 +136,16 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Resolve or install Android SDK on ARM64
+      - name: Resolve or install Android SDK 35
         shell: bash
-        env:
-          CMDLINE_TOOLS_URL: https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip
-          CMDLINE_TOOLS_SHA256: 4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583
         run: |
           set -euxo pipefail
+          test "$(uname -m)" = "x86_64"
           uname -a
-          uname -m | tee runner-architecture.txt
-          test "$(uname -m)" = "aarch64"
-          lscpu
           java -version
-          echo "Initial ANDROID_HOME=${ANDROID_HOME:-}"
-          echo "Initial ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
 
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          if [ -z "$SDK_ROOT" ]; then
-            for candidate in \
-              /usr/local/lib/android/sdk \
-              /opt/android-sdk \
-              /opt/android-sdk-linux \
-              "$HOME/Android/Sdk"; do
-              if [ -d "$candidate/platforms/android-35" ]; then
-                SDK_ROOT="$candidate"
-                break
-              fi
-            done
-          fi
-
-          if [ -z "$SDK_ROOT" ]; then
-            PLATFORM_DIR=$(find /usr/local /opt "$HOME" -maxdepth 7 -type d -path '*/platforms/android-35' -print -quit 2>/dev/null || true)
-            if [ -n "$PLATFORM_DIR" ]; then
-              SDK_ROOT="${PLATFORM_DIR%/platforms/android-35}"
-            fi
-          fi
-
-          if [ -z "$SDK_ROOT" ]; then
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT/platforms/android-35" ]; then
             SDK_ROOT="$RUNNER_TEMP/android-sdk"
             TOOLS_ZIP="$RUNNER_TEMP/android-command-line-tools.zip"
             EXTRACT_ROOT="$RUNNER_TEMP/android-command-line-tools"
@@ -79,7 +158,6 @@ jobs:
             mv "$EXTRACT_ROOT/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
 
             SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-            test -x "$SDKMANAGER"
             set +o pipefail
             yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null
             LICENSE_EXIT=${PIPESTATUS[1]}
@@ -95,20 +173,9 @@ jobs:
           test -n "$BUILD_TOOLS_DIR"
           test -x "$BUILD_TOOLS_DIR/apksigner"
 
-          export ANDROID_HOME="$SDK_ROOT"
-          export ANDROID_SDK_ROOT="$SDK_ROOT"
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "APKSIGNER_PATH=$BUILD_TOOLS_DIR/apksigner" >> "$GITHUB_ENV"
-          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
-          echo "$BUILD_TOOLS_DIR" >> "$GITHUB_PATH"
-
-          echo "Resolved Android SDK: $SDK_ROOT"
-          echo "Resolved build tools: $BUILD_TOOLS_DIR"
-          SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -type f -path '*/bin/sdkmanager' -print -quit 2>/dev/null || true)
-          if [ -n "$SDKMANAGER" ]; then
-            "$SDKMANAGER" --version || true
-          fi
 
       - name: Build unsigned release and installable debug APKs
         shell: bash
@@ -168,10 +235,8 @@ jobs:
           test -n "$VERSION_CODE"
 
           mkdir -p release-assets
-          UNSIGNED_OUT="release-assets/QitongAI-${VERSION_NAME}-arm64-v8a-unsigned.apk"
-          DEBUG_OUT="release-assets/QitongAI-${VERSION_NAME}-arm64-v8a-debug-signed.apk"
-          cp "$UNSIGNED" "$UNSIGNED_OUT"
-          cp "$DEBUG" "$DEBUG_OUT"
+          cp "$UNSIGNED" "release-assets/QitongAI-${VERSION_NAME}-arm64-v8a-unsigned.apk"
+          cp "$DEBUG" "release-assets/QitongAI-${VERSION_NAME}-arm64-v8a-debug-signed.apk"
 
           (
             cd release-assets
@@ -182,16 +247,16 @@ jobs:
           Repository: $GITHUB_REPOSITORY
           Commit: $GITHUB_SHA
           Git ref: $GITHUB_REF
-          Runner OS: $RUNNER_OS
-          Runner architecture reported by GitHub: $RUNNER_ARCH
-          uname -m: $(uname -m)
+          Packaging runner: $RUNNER_OS / $RUNNER_ARCH / $(uname -m)
           Android target ABI: arm64-v8a only
           App version name: $VERSION_NAME
           App version code: $VERSION_CODE
           Java: $(java -version 2>&1 | head -n1)
+          Native ARM64 probe result: ${{ needs.native-arm64-probe.outputs.build_result }}
+          Native ARM64 probe exit code: ${{ needs.native-arm64-probe.outputs.build_exit_code }}
 
           QitongAI-${VERSION_NAME}-arm64-v8a-unsigned.apk
-            Unsigned release build. This cannot be installed directly on a normal Android phone.
+            Unsigned release build. Android will not install it until it is signed.
 
           QitongAI-${VERSION_NAME}-arm64-v8a-debug-signed.apk
             Installable test build signed by the temporary GitHub runner debug key.
@@ -199,17 +264,28 @@ jobs:
           EOF
 
           cp debug-signing-certificate.txt release-assets/
-
           echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
 
-      - name: Upload workflow artifact
+      - name: Download native ARM64 probe logs
+        uses: actions/download-artifact@v5
+        with:
+          name: native-arm64-build-probe
+          path: release-assets/native-arm64-probe
+
+      - name: Archive native ARM64 probe logs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          (cd release-assets && zip -qr native-arm64-probe-logs.zip native-arm64-probe)
+
+      - name: Upload packaged APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: QitongAI-${{ steps.package.outputs.version_name }}-native-arm64-apks
-          path: release-assets/*
+          name: QitongAI-${{ steps.package.outputs.version_name }}-arm64-v8a-apks
+          path: release-assets/**
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
       - name: Create GitHub release for tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -218,12 +294,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION_NAME: ${{ steps.package.outputs.version_name }}
           VERSION_CODE: ${{ steps.package.outputs.version_code }}
+          NATIVE_RESULT: ${{ needs.native-arm64-probe.outputs.build_result }}
+          NATIVE_EXIT_CODE: ${{ needs.native-arm64-probe.outputs.build_exit_code }}
         run: |
           set -euxo pipefail
           cat > release-notes.md <<EOF
           ## QiTong AI Station ${VERSION_NAME}
-
-          Built on GitHub's native Linux ARM64 hosted runner: ubuntu-24.04-arm, with uname -m reporting aarch64.
 
           ### Phone testing
 
@@ -231,22 +307,33 @@ jobs:
 
           The requested **QitongAI-${VERSION_NAME}-arm64-v8a-unsigned.apk** is also attached, but Android will not install an unsigned APK until it is signed.
 
-          ### Build properties
+          ### APK verification
 
           - App version code: ${VERSION_CODE}
-          - Packaged ABI: arm64-v8a only
+          - Packaged Android ABI: arm64-v8a only
           - Release APK: verified unsigned
           - Debug APK: verified signed with the workflow runner's temporary debug certificate
           - JVM unit tests: passed
           - Android lint: passed
           - Release, debug, and instrumentation-test APK assembly: passed
 
-          Verify downloads with SHA256SUMS.txt. Detailed runner and signing information is in BUILD-INFO.txt and debug-signing-certificate.txt.
+          ### Native GitHub ARM64 runner probe
+
+          - Runner: ubuntu-24.04-arm
+          - Host architecture: aarch64
+          - Build result: ${NATIVE_RESULT}
+          - Gradle exit code: ${NATIVE_EXIT_CODE}
+
+          The native runner's complete logs are attached as native-arm64-probe-logs.zip. Packaging is performed on GitHub's x64 runner because the Android Gradle Plugin's official Linux AAPT2 binary is x86-64, while the APK itself is independently restricted and verified as arm64-v8a only.
+
+          Verify downloads with SHA256SUMS.txt. Detailed build and signing information is in BUILD-INFO.txt and debug-signing-certificate.txt.
           EOF
 
           gh release create "$GITHUB_REF_NAME" \
-            release-assets/* \
+            release-assets/*.apk \
+            release-assets/*.txt \
+            release-assets/*.zip \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "QiTong AI Station ${VERSION_NAME} ARM64 test build" \
+            --title "QiTong AI Station ${VERSION_NAME} ARM64 APKs" \
             --notes-file release-notes.md
