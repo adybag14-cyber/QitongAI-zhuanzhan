@@ -19,7 +19,7 @@
     <string name="contact_author">Contact Author</string>
     <string name="tech_stack">Tech Stack</string>
     <string name="app_desc">AI web automation tool\nChat with free web AIs like a human, chain multiple platforms</string>
-    <string name="version">v1.0.0</string>
+    <string name="version">v1.0.0-26</string>
     <string name="submit_issue">Submit an Issue or suggestion</string>
     <string name="click_join_qq">Click to join QQ group (ID: 1007488535)</string>
     <string name="copyright">© 2026 QiTong Network</string>
@@ -80,4 +80,22 @@
     <string name="no_data">No data</string>
     <string name="bookmarks">Bookmarks</string>
     <string name="bookmark_current">Bookmark Current Page</string>
+
+    <!-- Multi-AI pipeline -->
+    <string name="pipeline_title">Multi-AI Pipeline</string>
+    <string name="pipeline_description">Pass each platform\'s complete reply to the next platform in order. Sign in to every selected service before running.</string>
+    <string name="pipeline_initial_prompt">Initial prompt</string>
+    <string name="pipeline_prompt_hint">Enter the message for the first AI</string>
+    <string name="pipeline_platform_order">Platform order</string>
+    <string name="pipeline_platform_order_hint">Select platforms and arrange the execution order.</string>
+    <string name="pipeline_start">Start Pipeline</string>
+    <string name="pipeline_cancel">Cancel Pipeline</string>
+    <string name="pipeline_ready">Ready</string>
+    <string name="pipeline_running">Pipeline running</string>
+    <string name="pipeline_completed">Pipeline completed</string>
+    <string name="pipeline_failed">Pipeline failed</string>
+    <string name="pipeline_cancelled">Pipeline cancelled</string>
+    <string name="pipeline_final_output">Final output</string>
+    <string name="pipeline_move_up">Move up</string>
+    <string name="pipeline_move_down">Move down</string>
 </resources>

@@ -29,8 +29,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.qtwl.YitongAIzhuanzhan.AiPlatformRegistry
+import com.qtwl.YitongAIzhuanzhan.AutoChatTaskQueue
 import com.qtwl.YitongAIzhuanzhan.BookmarkManager
 import com.qtwl.YitongAIzhuanzhan.JsInjector
+import com.qtwl.YitongAIzhuanzhan.MultiAiPipelineRunner
+import com.qtwl.YitongAIzhuanzhan.PipelineRunState
+import com.qtwl.YitongAIzhuanzhan.PipelineSnapshot
 import com.qtwl.YitongAIzhuanzhan.R
 import com.qtwl.YitongAIzhuanzhan.WebViewManager
 import com.qtwl.YitongAIzhuanzhan.ui.components.GlassCard
@@ -44,9 +49,13 @@ fun BrowserScreen(
 ) {
     val isDark = MaterialTheme.colorScheme.background == GlassBackgroundDark
     val context = LocalContext.current
+    val newTabLabel = stringResource(R.string.new_tab)
+    val bookmarkedMessage = stringResource(R.string.bookmarked)
+    val removedBookmarkFormat = stringResource(R.string.removed_bookmark, "__BOOKMARK_NAME__")
+    val defaultsRestoredMessage = stringResource(R.string.default_bookmarks_restored)
 
     var refreshKey by remember { mutableIntStateOf(0) }
-    val onStateChange: () -> Unit = { refreshKey++ }
+    val onStateChange: () -> Unit = remember { { refreshKey++ } }
 
     var urlInput by remember { mutableStateOf("") }
     var showUrlBar by remember { mutableStateOf(false) }
@@ -56,9 +65,32 @@ fun BrowserScreen(
     var showAiExtract by remember { mutableStateOf(false) }
     var aiMessage by remember { mutableStateOf("") }
     var extractedContent by remember { mutableStateOf("") }
+    var showPipelineDialog by remember { mutableStateOf(false) }
+    var pipelinePrompt by remember { mutableStateOf("") }
+    var pipelineOrder by remember {
+        mutableStateOf(AiPlatformRegistry.supported.map { it.id })
+    }
+    var selectedPipelinePlatforms by remember {
+        mutableStateOf(AiPlatformRegistry.supported.map { it.id }.toSet())
+    }
+    var pipelineSnapshot by remember { mutableStateOf(PipelineSnapshot.Idle) }
+    val pipelineRunner = remember(context) {
+        MultiAiPipelineRunner(context) { snapshot ->
+            pipelineSnapshot = snapshot
+        }
+    }
+
+    DisposableEffect(pipelineRunner) {
+        WebViewManager.addListener(onStateChange)
+        onDispose {
+            WebViewManager.removeListener(onStateChange)
+            pipelineRunner.cancel()
+        }
+    }
 
     // 确保至少有一个标签页
     remember {
+        AutoChatTaskQueue.initialize(context)
         if (WebViewManager.getTabCount() == 0) {
             WebViewManager.createTab(context)
         }
@@ -194,6 +226,7 @@ fun BrowserScreen(
                 },
                 onBookmarks = { showBookmarks = !showBookmarks },
                 onAiDialog = { showAiDialog = true },
+                onPipeline = { showPipelineDialog = true },
                 isDark = isDark
             )
         }
@@ -220,69 +253,12 @@ fun BrowserScreen(
                 key(tab.id) {
                     AndroidView(
                         factory = { ctx ->
-                            // 复用已有的 WebView，避免重复创建
-                            tab.webView?.let { existingWv ->
-                                existingWv.loadUrl(tab.url)
-                                return@AndroidView existingWv
-                            }
-                            val wv = WebView(ctx).apply {
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                                settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = true
-                                settings.loadWithOverviewMode = true
-                                settings.useWideViewPort = true
-                                settings.builtInZoomControls = true
-                                settings.displayZoomControls = false
-                                settings.setSupportZoom(true)
-                                settings.allowFileAccess = false
-                                settings.setSupportMultipleWindows(true)
-                                settings.javaScriptCanOpenWindowsAutomatically = true
-                                settings.mediaPlaybackRequiresUserGesture = false
-                                settings.userAgentString = com.qtwl.YitongAIzhuanzhan.USER_AGENT_DESKTOP
-                                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                                settings.databaseEnabled = true
-                                settings.allowContentAccess = true
-                                webViewClient = object : android.webkit.WebViewClient() {
-                                    override fun onPageStarted(view: android.webkit.WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                                        tab.isLoading = true
-                                        url?.let { tab.url = it }
-                                        onStateChange()
-                                    }
-                                    override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
-                                        tab.isLoading = false
-                                        tab.title = view?.title ?: ""
-                                        tab.canGoBack = view?.canGoBack() ?: false
-                                        tab.canGoForward = view?.canGoForward() ?: false
-                                        onStateChange()
-                                    }
-                                    override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean {
-                                        return false
-                                    }
-                                }
-                                webChromeClient = object : android.webkit.WebChromeClient() {
-                                    override fun onProgressChanged(view: android.webkit.WebView?, newProgress: Int) {
-                                        tab.progress = newProgress
-                                        if (newProgress == 100) tab.isLoading = false
-                                        onStateChange()
-                                    }
-                                    override fun onReceivedTitle(view: android.webkit.WebView?, title: String?) {
-                                        tab.title = title ?: ""
-                                        onStateChange()
-                                    }
-                                }
-                                CookieManager.getInstance().setAcceptCookie(true)
-                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                                CookieManager.getInstance().flush()
-                            }
-                            tab.webView = wv
-                            if (tab.url.isNotEmpty()) {
-                                wv.loadUrl(tab.url)
-                            }
-                            wv
+                            val webView = requireNotNull(WebViewManager.initWebView(ctx, tab.id))
+                            (webView.parent as? ViewGroup)?.removeView(webView)
+                            webView
+                        },
+                        update = { webView ->
+                            tab.webView = webView
                         },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -326,19 +302,19 @@ fun BrowserScreen(
                     },
                     onAdd = {
                         currentTab?.let { tab ->
-                            BookmarkManager.addBookmark(context, tab.title.ifEmpty { context.getString(R.string.new_tab) }, tab.url)
-                            Toast.makeText(context, context.getString(R.string.bookmarked), Toast.LENGTH_SHORT).show()
+                            BookmarkManager.addBookmark(context, tab.title.ifEmpty { newTabLabel }, tab.url)
+                            Toast.makeText(context, bookmarkedMessage, Toast.LENGTH_SHORT).show()
                         }
                         showBookmarks = false
                     },
                     onRemove = { bookmark ->
                         BookmarkManager.removeBookmark(context, bookmark.url)
-                        Toast.makeText(context, context.getString(R.string.removed_bookmark, bookmark.name), Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, removedBookmarkFormat.replace("__BOOKMARK_NAME__", bookmark.name), Toast.LENGTH_SHORT).show()
                         refreshKey++
                     },
                     onReset = {
                         BookmarkManager.resetToDefault(context)
-                        Toast.makeText(context, context.getString(R.string.default_bookmarks_restored), Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, defaultsRestoredMessage, Toast.LENGTH_SHORT).show()
                         refreshKey++
                     },
                     onDismiss = { showBookmarks = false }
@@ -379,6 +355,42 @@ fun BrowserScreen(
             }
 
             // 提取结果对话框
+            if (showPipelineDialog) {
+                MultiAiPipelineDialog(
+                    prompt = pipelinePrompt,
+                    onPromptChange = { pipelinePrompt = it },
+                    orderedPlatformIds = pipelineOrder,
+                    selectedPlatformIds = selectedPipelinePlatforms,
+                    onTogglePlatform = { platformId ->
+                        selectedPipelinePlatforms = if (platformId in selectedPipelinePlatforms) {
+                            selectedPipelinePlatforms - platformId
+                        } else {
+                            selectedPipelinePlatforms + platformId
+                        }
+                    },
+                    onMovePlatform = { fromIndex, toIndex ->
+                        if (fromIndex in pipelineOrder.indices && toIndex in pipelineOrder.indices) {
+                            val reordered = pipelineOrder.toMutableList()
+                            val moved = reordered.removeAt(fromIndex)
+                            reordered.add(toIndex, moved)
+                            pipelineOrder = reordered
+                        }
+                    },
+                    snapshot = pipelineSnapshot,
+                    onStart = {
+                        val selectedInOrder = pipelineOrder.filter { it in selectedPipelinePlatforms }
+                        pipelineRunner.start(pipelinePrompt, selectedInOrder)
+                    },
+                    onCancel = { pipelineRunner.cancel() },
+                    onDismiss = {
+                        if (pipelineSnapshot.state != PipelineRunState.RUNNING) {
+                            showPipelineDialog = false
+                        }
+                    },
+                    isDark = isDark
+                )
+            }
+
             if (showAiExtract) {
                 AiResultDialog(content = extractedContent, onDismiss = { showAiExtract = false }, isDark = isDark)
             }
@@ -493,6 +505,7 @@ private fun BottomNavigationBar(
     onBack: () -> Unit, onForward: () -> Unit, onRefresh: () -> Unit, onStop: () -> Unit,
     onHome: () -> Unit, onNewTab: () -> Unit,
     onBookmarks: () -> Unit, onAiDialog: () -> Unit,
+    onPipeline: () -> Unit,
     isDark: Boolean
 ) {
     val scrollState = rememberScrollState()
@@ -514,6 +527,7 @@ private fun BottomNavigationBar(
             NavButton(Icons.Outlined.Bookmarks, true, onBookmarks, isDark)
             // AI 注入按钮
             NavButton(Icons.Filled.Send, true, onAiDialog, isDark, true)
+            NavButton(Icons.Filled.AccountTree, true, onPipeline, isDark, true)
         }
     }
 }

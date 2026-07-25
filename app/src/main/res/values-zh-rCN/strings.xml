@@ -19,7 +19,7 @@
     <string name="contact_author">联系作者</string>
     <string name="tech_stack">技术栈</string>
     <string name="app_desc">多AI网页自动化对话工具\n像真人一样操作免费网页AI，自动串联多平台对话</string>
-    <string name="version">v1.0.0</string>
+    <string name="version">v1.0.0-26</string>
     <string name="submit_issue">提交 Issue 或建议</string>
     <string name="click_join_qq">点击加入 QQ 交流群（群号: 1007488535）</string>
     <string name="copyright">© 2026 綦桐网络</string>
@@ -80,4 +80,22 @@
     <string name="no_data">无数据</string>
     <string name="bookmarks">收藏夹</string>
     <string name="bookmark_current">收藏当前页面</string>
+
+    <!-- Multi-AI pipeline -->
+    <string name="pipeline_title">多AI流水线</string>
+    <string name="pipeline_description">按顺序把每个平台的完整回复传给下一个平台。运行前请先在所选平台登录。</string>
+    <string name="pipeline_initial_prompt">初始提示词</string>
+    <string name="pipeline_prompt_hint">输入发送给第一个AI的内容</string>
+    <string name="pipeline_platform_order">平台顺序</string>
+    <string name="pipeline_platform_order_hint">勾选平台并调整执行顺序。</string>
+    <string name="pipeline_start">开始流水线</string>
+    <string name="pipeline_cancel">取消流水线</string>
+    <string name="pipeline_ready">准备就绪</string>
+    <string name="pipeline_running">流水线运行中</string>
+    <string name="pipeline_completed">流水线已完成</string>
+    <string name="pipeline_failed">流水线失败</string>
+    <string name="pipeline_cancelled">流水线已取消</string>
+    <string name="pipeline_final_output">最终输出</string>
+    <string name="pipeline_move_up">上移</string>
+    <string name="pipeline_move_down">下移</string>
 </resources>

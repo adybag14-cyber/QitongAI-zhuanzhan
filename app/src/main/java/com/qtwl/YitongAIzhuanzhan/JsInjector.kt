@@ -3,681 +3,606 @@ package com.qtwl.YitongAIzhuanzhan
 import android.os.Handler
 import android.os.Looper
 import android.webkit.WebView
+import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 
+/** Result of one complete web-AI interaction: ready -> fill -> send -> stable reply. */
+data class WebAutomationResult(
+    val success: Boolean,
+    val stage: String,
+    val detail: String,
+    val response: String = ""
+)
+
+class AutomationHandle internal constructor() {
+    private val cancelled = AtomicBoolean(false)
+
+    fun cancel() {
+        cancelled.set(true)
+    }
+
+    internal fun isCancelled(): Boolean = cancelled.get()
+}
+
+private data class ReplySnapshot(
+    val text: String,
+    val count: Int,
+    val loading: Boolean,
+    val inputFound: Boolean,
+    val loginLikely: Boolean,
+    val url: String
+)
+
+/**
+ * JavaScript bridge for web AI pages.
+ *
+ * Unlike the original fire-and-forget implementation, this bridge takes a reply
+ * baseline before sending, waits for a new assistant-only message, and requires
+ * that message to remain stable after generation stops before returning it.
+ */
 object JsInjector {
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private const val READY_TIMEOUT_MS = 45_000L
+    private const val POLL_INTERVAL_MS = 900L
+    private const val REQUIRED_STABLE_POLLS = 3
 
-    // ==================== 豆包专属 JS ====================
+    fun sendAndAwaitReply(
+        platformId: String,
+        webView: WebView,
+        message: String,
+        timeoutMs: Long = 150_000L,
+        callback: (WebAutomationResult) -> Unit
+    ): AutomationHandle {
+        val platform = AiPlatformRegistry.get(platformId) ?: AiPlatformRegistry.generic()
+        val handle = AutomationHandle()
+        val finished = AtomicBoolean(false)
+        val deadline = System.currentTimeMillis() + timeoutMs
 
-    private const val FILL_DOUBAO_JS = """
-(function(text){
-  var ta = document.querySelector('textarea[data-testid="chat_input_input"]')
-        || document.querySelector('textarea[placeholder*="输入消息"]')
-        || document.querySelector('textarea');
-  if(!ta) return 'NO_INPUT';
-  ta.focus();
-  var setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;
-  setter.call(ta, text);
-  ta.dispatchEvent(new Event('input',{bubbles:true}));
-  ta.dispatchEvent(new Event('change',{bubbles:true}));
-  return 'FILLED';
-})
-"""
-
-    private const val SEND_DOUBAO_JS = """
-(function(){
-  var ta = document.querySelector('textarea[data-testid="chat_input_input"]')
-        || document.querySelector('textarea');
-  if(ta){
-    ta.focus();
-    ta.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true}));
-  }
-  setTimeout(function(){
-    var btn = document.querySelector('#flow-end-msg-send')
-          || [...document.querySelectorAll('button')].find(function(b){
-              return /发送/.test((b.getAttribute('aria-label')||'')) && b.getAttribute('aria-disabled')!=='true';
-            });
-    if(btn){
-      btn.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));
-      btn.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
-      btn.click();
-    }
-  }, 350);
-  return 'SENT';
-})
-"""
-
-    private const val WATCH_DOUBAO_JS = """
-(function(){
-  if(window.__db_watch) return 'WATCHING';
-  window.__db_watch = true;
-  var stable = 0, last = '';
-  var mo = new MutationObserver(function(){
-    var loading = document.querySelector('.loading-spinner,[aria-busy=true]');
-    var node = document.querySelector('.message-bubble:last-child .markdown-body')
-            || document.querySelector('[data-testid="message_text_content"]:last-child');
-    var txt = node ? node.innerText.trim() : '';
-    if(!loading && txt && txt === last){ stable++; } else { stable = 0; last = txt; }
-    if(stable >= 3 && last.length > 10){
-      window.__db_reply = last;
-      window.__db_watch = false;
-      mo.disconnect();
-    }
-  });
-  mo.observe(document.body,{childList:true,subtree:true,characterData:true});
-  return 'WATCH_STARTED';
-})
-"""
-
-    private const val GET_DOUBAO_REPLY_JS = """
-(function(){
-  var r = window.__db_reply || '';
-  window.__db_reply = '';
-  return r;
-})
-"""
-
-    // ==================== 豆包专属 Kotlin 发送 ====================
-
-    fun sendToDoubao(webView: WebView, text: String, onResult: (String) -> Unit) {
-        val escaped = text.toJsonLiteral()
-        val fillJs = "($FILL_DOUBAO_JS)($escaped)"
-        webView.evaluateJavascript(fillJs) { result ->
-            val clean = result?.trim()?.trim('"') ?: ""
-            if (clean.contains("NO_INPUT")) {
-                onResult("ERROR: 豆包输入框未找到")
-                return@evaluateJavascript
-            }
-            val delay = (400..800).random().toLong()
-            Handler(Looper.getMainLooper()).postDelayed({
-                webView.evaluateJavascript(WATCH_DOUBAO_JS, null)
-                webView.evaluateJavascript(SEND_DOUBAO_JS, null)
-                Handler(Looper.getMainLooper()).postDelayed({
-                    webView.evaluateJavascript(GET_DOUBAO_REPLY_JS) { reply ->
-                        val cleanReply = reply?.trim()?.trim('"') ?: ""
-                        if (cleanReply.isNotEmpty() && cleanReply != "null") {
-                            onResult("REPLY:$cleanReply")
-                        } else {
-                            onResult("SENT")
-                        }
-                    }
-                }, 3000)
-            }, delay)
-        }
-    }
-
-    // ==================== 统一分发入口 ====================
-
-    fun fillAndSend(tag: String, webView: WebView, text: String, onResult: (String) -> Unit) {
-        when (tag) {
-            "doubao"  -> sendToDoubao(webView, text, onResult)
-            "yuanbao" -> {
-                injectJs(webView, getAutoChatScript(text)) { raw ->
-                    onResult(parseGenericResult(raw))
-                }
-            }
-            else      -> {
-                injectJs(webView, getAutoChatScript(text)) { raw ->
-                    onResult(parseGenericResult(raw))
-                }
+        fun finish(result: WebAutomationResult) {
+            if (!handle.isCancelled() && finished.compareAndSet(false, true)) {
+                callback(result)
             }
         }
-    }
 
-    private fun parseGenericResult(raw: String): String {
-        return try {
-            val json = JSONObject(raw)
-            val success = json.optBoolean("success", false)
-            val method = json.optString("method", "")
-            val error = json.optString("error", "")
-            val platform = json.optString("platform", "")
-            buildString {
-                if (success) append("✅ 成功") else append("❌ 失败")
-                if (platform.isNotEmpty()) append(" | 平台:$platform")
-                if (method.isNotEmpty()) append(" | 方式:$method")
-                if (error.isNotEmpty()) append(" | 错误:$error")
-            }
-        } catch (e: Exception) {
-            "解析失败: ${e.message}"
-        }
-    }
-
-    // ==================== 工具函数 ====================
-
-    private fun String.toJsonLiteral(): String {
-        return JSONObject().put("v", this).toString()
-            .let { it.substring(5, it.length - 1) }
-    }
-
-    // ==================== 通用 JS 注入 ====================
-
-    fun getAutoChatScript(message: String): String {
-        val msg = message.replace("\\", "\\\\")
-            .replace("'", "\\'")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\"", "\\\"")
-        
-        return """
-(function() {
-    try {
-        var result = {success: false, error: '', method: '', inputFound: false, btnFound: false, platform: ''};
-        var url = window.location.href;
-        var isYuanbao = url.includes('yuanbao.tencent.com') || url.includes('yuanbao');
-        if (isYuanbao) result.platform = 'yuanbao';
-        
-        function findInShadowDom(selector) {
-            var el = document.querySelector(selector);
-            if (el) return el;
-            function walk(root) {
-                if (!root) return null;
-                var found = root.querySelector(selector);
-                if (found) return found;
-                var hosts = root.querySelectorAll('*');
-                for (var i = 0; i < hosts.length; i++) {
-                    var host = hosts[i];
-                    if (host.shadowRoot) {
-                        var f = walk(host.shadowRoot);
-                        if (f) return f;
-                    }
+        fun begin() {
+            waitUntilReady(
+                platform = platform,
+                webView = webView,
+                handle = handle,
+                readyDeadline = minOf(deadline, System.currentTimeMillis() + READY_TIMEOUT_MS)
+            ) { ready, readyDetail ->
+                if (!ready) {
+                    finish(
+                        WebAutomationResult(
+                            success = false,
+                            stage = "ready",
+                            detail = readyDetail
+                        )
+                    )
+                    return@waitUntilReady
                 }
-                return null;
-            }
-            return walk(document);
-        }
-        
-        if (isYuanbao) {
-            var input = findInShadowDom('[data-slate-editor]') ||
-                        findInShadowDom('[contenteditable="true"][data-slate-node="element"]') ||
-                        findInShadowDom('.input-area textarea') ||
-                        findInShadowDom('textarea[placeholder*="输入"]') ||
-                        findInShadowDom('[data-testid*="input"]') ||
-                        findInShadowDom('[role="textbox"]');
-            
-            if (!input) {
-                var allEditable = document.querySelectorAll('[contenteditable], [data-slate-editor]');
-                for (var i = 0; i < allEditable.length; i++) {
-                    var el = allEditable[i];
-                    if (el.offsetParent !== null && el.tabIndex !== -1 && !el.disabled) {
-                        input = el; break;
+
+                captureSnapshot(platform, webView, handle) { baseline ->
+                    if (baseline == null) {
+                        finish(
+                            WebAutomationResult(
+                                success = false,
+                                stage = "baseline",
+                                detail = "Could not inspect the current conversation"
+                            )
+                        )
+                        return@captureSnapshot
                     }
-                }
-            }
-            
-            if (input) {
-                result.inputFound = true;
-                try { input.focus(); } catch(e) {}
-                try { input.click(); } catch(e) {}
-                try {
-                    var r = input.getBoundingClientRect();
-                    if (r.width === 0 || r.height === 0) {
-                        input.scrollIntoView({behavior:'instant', block:'center'});
-                    }
-                } catch(e) {}
-                try {
-                    if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
-                        input.value = '';
-                    } else if (input.isContentEditable) {
-                        if (typeof input.innerHTML === 'string') input.innerHTML = '';
-                        if (typeof input.textContent === 'string') input.textContent = '';
-                    }
-                } catch(e) {}
-                
-                var text = '$msg';
-                var successInput = false;
-                
-                try {
-                    if (input.isContentEditable) {
-                        var sel = window.getSelection();
-                        var range = document.createRange();
-                        range.selectNodeContents(input);
-                        range.collapse(false);
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                        var textEvent = document.createEvent('TextEvent');
-                        textEvent.initTextEvent('textInput', true, true, window, text, 0, 'en-US');
-                        input.dispatchEvent(textEvent);
-                        var textNode = document.createTextNode(text);
-                        range.insertNode(textNode);
-                        range.setStartAfter(textNode);
-                        range.setEndAfter(textNode);
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                        successInput = true;
-                    }
-                } catch(e1) {}
-                
-                if (!successInput) {
-                    try {
-                        var inputEvt = new InputEvent('input', {
-                            bubbles: true, cancelable: true, data: text,
-                            inputType: 'insertText', isComposing: false
-                        });
-                        if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
-                            input.value = text;
-                        } else if (input.isContentEditable) {
-                            var sel = window.getSelection();
-                            var range = document.createRange();
-                            range.selectNodeContents(input);
-                            range.collapse(false);
-                            sel.removeAllRanges();
-                            sel.addRange(range);
-                            var textNode = document.createTextNode(text);
-                            range.insertNode(textNode);
-                            range.setStartAfter(textNode);
-                            range.setEndAfter(textNode);
-                            sel.removeAllRanges();
-                            sel.addRange(range);
+
+                    evaluateJson(webView, buildFillScript(platform, message), handle) { fill ->
+                        if (fill?.optBoolean("success", false) != true) {
+                            finish(
+                                WebAutomationResult(
+                                    success = false,
+                                    stage = "fill",
+                                    detail = fill?.optString("error")
+                                        ?.takeIf { it.isNotBlank() }
+                                        ?: "The message input could not be filled"
+                                )
+                            )
+                            return@evaluateJson
                         }
-                        input.dispatchEvent(inputEvt);
-                        successInput = true;
-                    } catch(e2) {}
-                }
-                
-                if (!successInput) {
-                    try {
-                        if (input.isContentEditable) {
-                            document.execCommand('insertText', false, text);
-                        } else {
-                            input.value = text;
-                            var ev = new Event('input', {bubbles:true, cancelable:true});
-                            input.dispatchEvent(ev);
-                        }
-                        successInput = true;
-                    } catch(e3) {}
-                }
-                
-                if (!successInput) {
-                    try {
-                        if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
-                            input.value = text;
-                        } else if (input.isContentEditable) {
-                            input.textContent = text;
-                        }
-                        var ev = new Event('input', {bubbles:true, cancelable:true});
-                        input.dispatchEvent(ev);
-                    } catch(e4) {}
-                }
-                
-                try {
-                    var changeEvt = new Event('change', {bubbles:true, cancelable:true});
-                    input.dispatchEvent(changeEvt);
-                } catch(e) {}
-                
-                var sendBtn = null;
-                var selectors = [
-                    'button[data-testid*="send"]',
-                    'button[aria-label*="发送"]',
-                    'button[aria-label*="Send"]',
-                    'button[class*="send"]',
-                    'button[class*="Send"]',
-                    'button.send-btn',
-                    '.send-button',
-                    'button[type="submit"]',
-                    'input[type="submit"]',
-                    'button:has(svg)',
-                    'button:has([class*="icon-send"])',
-                    '[role="button"][aria-label*="发送"]',
-                    'button[data-cy*="send"]'
-                ];
-                
-                try {
-                    if (input.parentNode) {
-                        var nearby = input.parentNode.querySelector('[class*="send"], [aria-label*="发送"], button[type="submit"]');
-                        if (nearby && nearby.offsetWidth > 0 && nearby.offsetHeight > 0) {
-                            sendBtn = nearby;
-                        }
-                    }
-                } catch(e) {}
-                
-                if (!sendBtn) {
-                    for (var s = 0; s < selectors.length; s++) {
-                        var btns = document.querySelectorAll(selectors[s]);
-                        for (var i = 0; i < btns.length; i++) {
-                            var btn = btns[i];
-                            try {
-                                var r = btn.getBoundingClientRect();
-                                if (r.width > 5 && r.height > 5) {
-                                    sendBtn = btn; break;
+
+                        mainHandler.postDelayed({
+                            if (handle.isCancelled()) return@postDelayed
+                            evaluateJson(webView, buildSubmitScript(platform), handle) { send ->
+                                if (send?.optBoolean("success", false) != true) {
+                                    finish(
+                                        WebAutomationResult(
+                                            success = false,
+                                            stage = "send",
+                                            detail = send?.optString("error")
+                                                ?.takeIf { it.isNotBlank() }
+                                                ?: "No working send control was found"
+                                        )
+                                    )
+                                    return@evaluateJson
                                 }
-                            } catch(e) {}
-                        }
-                        if (sendBtn) break;
-                    }
-                }
-                
-                if (!sendBtn) {
-                    var allBtns = document.querySelectorAll('button');
-                    for (var i = 0; i < allBtns.length; i++) {
-                        var btn = allBtns[i];
-                        try {
-                            var r = btn.getBoundingClientRect();
-                            if (r.width === 0 || r.height === 0) continue;
-                            var t = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-                            if (t.includes('发送') || t.includes('send') || t.includes('submit') || t === '→' || t === '>') {
-                                sendBtn = btn; break;
+
+                                pollForStableReply(
+                                    platform = platform,
+                                    webView = webView,
+                                    handle = handle,
+                                    deadline = deadline,
+                                    baseline = baseline,
+                                    sentMessage = message,
+                                    lastText = "",
+                                    stablePolls = 0
+                                ) { result -> finish(result) }
                             }
-                        } catch(e) {}
+                        }, platform.afterFillDelayMs)
                     }
                 }
-                
-                if (sendBtn) {
-                    try { sendBtn.scrollIntoView({behavior:'instant', block:'center'}); } catch(e) {}
-                    try { sendBtn.focus(); } catch(e) {}
-                    try {
-                        sendBtn.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, view:window, button:0}));
-                        sendBtn.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, cancelable:true, view:window, button:0}));
-                        sendBtn.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window, button:0}));
-                    } catch(e) {}
-                    setTimeout(function() {
-                        try { sendBtn.click(); } catch(e) {}
-                        try {
-                            var form = sendBtn.closest('form');
-                            if (form) {
-                                form.dispatchEvent(new Event('submit', {bubbles:true, cancelable:true}));
-                                if (typeof form.submit === 'function') form.submit();
-                            }
-                        } catch(e) {}
-                    }, 150);
-                    result.method = 'click';
-                    result.btnFound = true;
-                    result.success = true;
-                    result.btnText = (sendBtn.innerText || '').trim();
-                    return JSON.stringify(result);
-                }
-                
-                var keys = ['keydown','keypress','keyup'];
-                for (var k = 0; k < keys.length; k++) {
-                    try {
-                        var ke = new KeyboardEvent(keys[k], {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true, cancelable:true});
-                        input.dispatchEvent(ke);
-                    } catch(e) {}
-                }
-                result.method = 'enter';
-                result.success = true;
-                return JSON.stringify(result);
-            }
-        }
-        
-        var input = null;
-        var selectors = [
-            'textarea', '[contenteditable="true"]', 'input[type="text"]',
-            'input[type="search"]', '.ql-editor', '.ProseMirror',
-            '[data-testid="chat-input"]', '[data-role="editor"]',
-            '[role="textbox"]', '[data-slate-editor]'
-        ];
-        for (var s = 0; s < selectors.length; s++) {
-            var els = document.querySelectorAll(selectors[s]);
-            for (var i = 0; i < els.length; i++) {
-                var el = els[i];
-                if ((el.offsetParent !== null || el.isContentEditable) && el.tabIndex !== -1 && !el.disabled) {
-                    input = el; break;
-                }
-            }
-            if (input) break;
-        }
-        if (!input) {
-            var all = document.querySelectorAll('div, span, p, [contenteditable]');
-            for (var i = 0; i < all.length; i++) {
-                if (all[i].isContentEditable && all[i].offsetParent !== null && all[i].tabIndex !== -1 && !all[i].disabled) {
-                    input = all[i]; break;
-                }
-            }
-        }
-        if (!input) { result.error = '找不到输入框'; return JSON.stringify(result); }
-        result.inputFound = true;
-
-        try { input.focus(); } catch(e) {}
-        try {
-            var rect = input.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) input.scrollIntoView({behavior:'instant', block:'center'});
-        } catch(e) {}
-        try { input.click(); } catch(e) {}
-        
-        if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') { input.value = ''; } 
-        else if (input.isContentEditable) { try { input.innerHTML = ''; } catch(e) {} }
-
-        var text = '$msg';
-        var successInput = false;
-        
-        try {
-            var sel = window.getSelection();
-            var range = document.createRange();
-            range.selectNodeContents(input);
-            range.collapse(false);
-            sel.removeAllRanges();
-            sel.addRange(range);
-            var textEvent = document.createEvent('TextEvent');
-            textEvent.initTextEvent('textInput', true, true, window, text, 0, 'en-US');
-            input.dispatchEvent(textEvent);
-            var textNode = document.createTextNode(text);
-            range.insertNode(textNode);
-            range.setStartAfter(textNode);
-            range.setEndAfter(textNode);
-            sel.removeAllRanges();
-            sel.addRange(range);
-            successInput = true;
-        } catch(e) {}
-        
-        if (!successInput) {
-            try {
-                var inputEvt = new InputEvent('input', {bubbles:true, cancelable:true, data:text, inputType:'insertText', isComposing:false});
-                if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') input.value = text;
-                else if (input.isContentEditable) {
-                    var sel = window.getSelection(); var range = document.createRange(); range.selectNodeContents(input); range.collapse(false); sel.removeAllRanges(); sel.addRange(range); var tn = document.createTextNode(text); range.insertNode(tn); range.setStartAfter(tn); range.setEndAfter(tn); sel.removeAllRanges(); sel.addRange(range);
-                }
-                input.dispatchEvent(inputEvt);
-                successInput = true;
-            } catch(e) {}
-        }
-        
-        if (!successInput) {
-            try {
-                if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') input.value = text;
-                else if (input.isContentEditable) input.textContent = text;
-                var ev = new Event('input', {bubbles:true, cancelable:true});
-                input.dispatchEvent(ev);
-                successInput = true;
-            } catch(e) {}
-        }
-
-        try {
-            var changeEvt = new Event('change', {bubbles:true, cancelable:true});
-            input.dispatchEvent(changeEvt);
-        } catch(e) {}
-
-        var sendBtn = null;
-        var btnSelectors = [
-            'button[class*="send"]', 'button[class*="Send"]', 'button[class*="submit"]',
-            'button[aria-label*="发送"]', 'button[aria-label*="Send"]',
-            '.send-btn', '.submit-btn', '.send-button', '.submit-button',
-            'button[type="submit"]', 'input[type="submit"]',
-            'button:has(svg)', 'button:has(i)', 'button:has(span)',
-            '[role="button"]', '[data-testid="send-button"]'
-        ];
-        for (var s = 0; s < btnSelectors.length; s++) {
-            var btns = document.querySelectorAll(btnSelectors[s]);
-            for (var i = 0; i < btns.length; i++) {
-                var btn = btns[i];
-                try {
-                    var r = btn.getBoundingClientRect();
-                    if (r.width === 0 || r.height === 0) continue;
-                    var t = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-                    if (t.includes('发送') || t.includes('send') || t.includes('submit') || t === '→' || t === '>' || t === '↑') {
-                        sendBtn = btn; break;
-                    }
-                } catch(e) {}
-            }
-            if (sendBtn) break;
-        }
-        if (!sendBtn) {
-            var allBtns = document.querySelectorAll('button, [role="button"], a[role="button"]');
-            for (var i = 0; i < allBtns.length; i++) {
-                var btn = allBtns[i];
-                try {
-                    var r = btn.getBoundingClientRect();
-                    if (r.width === 0 || r.height === 0) continue;
-                    var t = (btn.innerText || '').trim().toLowerCase();
-                    if (t.includes('发送') || t.includes('send') || t.includes('submit')) {
-                        sendBtn = btn; break;
-                    }
-                } catch(e) {}
             }
         }
 
-        if (sendBtn) {
-            try { sendBtn.scrollIntoView({behavior:'instant', block:'center'}); } catch(e) {}
-            try { sendBtn.focus(); } catch(e) {}
-            try {
-                sendBtn.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, view:window, button:0}));
-                sendBtn.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, cancelable:true, view:window, button:0}));
-                sendBtn.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window, button:0}));
-            } catch(e) {}
-            setTimeout(function() {
-                try { sendBtn.click(); } catch(e) {}
-                var form = sendBtn.closest('form');
-                if (form) {
-                    try { 
-                        form.dispatchEvent(new Event('submit', {bubbles:true, cancelable:true})); 
-                        if (typeof form.submit === 'function') form.submit();
-                    } catch(e) {}
-                }
-            }, 150);
-
-            result.method = 'click';
-            result.btnFound = true;
-            result.success = true;
-            result.btnText = (sendBtn.innerText || '').trim();
-            return JSON.stringify(result);
-        }
-
-        var enterEvents = ['keydown','keypress','keyup'];
-        for (var i = 0; i < enterEvents.length; i++) {
-            try {
-                var ke = new KeyboardEvent(enterEvents[i], {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true, cancelable:true});
-                input.dispatchEvent(ke);
-            } catch(e) {}
-        }
-        result.method = 'enter';
-        result.success = true;
-        return JSON.stringify(result);
-    } catch(e) {
-        return JSON.stringify({success: false, error: e.message, stack: e.stack});
-    }
-})();
-""".trimIndent()
+        if (Looper.myLooper() == Looper.getMainLooper()) begin() else mainHandler.post { begin() }
+        return handle
     }
 
-    fun getExtractScript(): String {
+    private fun waitUntilReady(
+        platform: AiPlatformDefinition,
+        webView: WebView,
+        handle: AutomationHandle,
+        readyDeadline: Long,
+        callback: (Boolean, String) -> Unit
+    ) {
+        if (handle.isCancelled()) return
+        evaluateJson(webView, buildReadyScript(platform), handle) { json ->
+            if (handle.isCancelled()) return@evaluateJson
+            val inputFound = json?.optBoolean("inputFound", false) == true
+            val readyState = json?.optString("readyState").orEmpty()
+            if (inputFound && readyState != "loading") {
+                callback(true, "ready")
+                return@evaluateJson
+            }
+
+            if (System.currentTimeMillis() >= readyDeadline) {
+                val loginLikely = json?.optBoolean("loginLikely", false) == true
+                val url = json?.optString("url").orEmpty()
+                val detail = if (loginLikely) {
+                    "${platform.displayName} requires sign-in or account confirmation before its message box is available ($url)"
+                } else {
+                    "${platform.displayName} did not expose a usable message box before the readiness timeout ($url)"
+                }
+                callback(false, detail)
+            } else {
+                mainHandler.postDelayed({
+                    waitUntilReady(platform, webView, handle, readyDeadline, callback)
+                }, POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun pollForStableReply(
+        platform: AiPlatformDefinition,
+        webView: WebView,
+        handle: AutomationHandle,
+        deadline: Long,
+        baseline: ReplySnapshot,
+        sentMessage: String,
+        lastText: String,
+        stablePolls: Int,
+        callback: (WebAutomationResult) -> Unit
+    ) {
+        if (handle.isCancelled()) return
+        captureSnapshot(platform, webView, handle) { snapshot ->
+            if (handle.isCancelled()) return@captureSnapshot
+            if (snapshot == null) {
+                if (System.currentTimeMillis() >= deadline) {
+                    callback(
+                        WebAutomationResult(
+                            success = false,
+                            stage = "reply",
+                            detail = "The page stopped returning conversation state"
+                        )
+                    )
+                } else {
+                    mainHandler.postDelayed({
+                        pollForStableReply(
+                            platform,
+                            webView,
+                            handle,
+                            deadline,
+                            baseline,
+                            sentMessage,
+                            lastText,
+                            stablePolls,
+                            callback
+                        )
+                    }, POLL_INTERVAL_MS)
+                }
+                return@captureSnapshot
+            }
+
+            val normalisedReply = snapshot.text.trim()
+            val normalisedSent = sentMessage.trim()
+            val hasNewReply = normalisedReply.isNotBlank() &&
+                normalisedReply != normalisedSent &&
+                (snapshot.count > baseline.count || normalisedReply != baseline.text.trim())
+            val nextStable = if (hasNewReply && snapshot.text == lastText) stablePolls + 1 else 0
+
+            if (hasNewReply && !snapshot.loading && nextStable >= REQUIRED_STABLE_POLLS) {
+                callback(
+                    WebAutomationResult(
+                        success = true,
+                        stage = "complete",
+                        detail = "Reply captured from ${platform.displayName}",
+                        response = snapshot.text
+                    )
+                )
+                return@captureSnapshot
+            }
+
+            if (System.currentTimeMillis() >= deadline) {
+                callback(
+                    WebAutomationResult(
+                        success = false,
+                        stage = "reply",
+                        detail = if (hasNewReply) {
+                            "${platform.displayName} produced text but it did not reach a stable completed state before timeout"
+                        } else {
+                            "No new assistant reply was detected from ${platform.displayName} before timeout (${snapshot.url})"
+                        },
+                        response = snapshot.text.takeIf { hasNewReply }.orEmpty()
+                    )
+                )
+                return@captureSnapshot
+            }
+
+            mainHandler.postDelayed({
+                pollForStableReply(
+                    platform = platform,
+                    webView = webView,
+                    handle = handle,
+                    deadline = deadline,
+                    baseline = baseline,
+                    sentMessage = sentMessage,
+                    lastText = if (hasNewReply) snapshot.text else lastText,
+                    stablePolls = nextStable,
+                    callback = callback
+                )
+            }, POLL_INTERVAL_MS)
+        }
+    }
+
+    private fun captureSnapshot(
+        platform: AiPlatformDefinition,
+        webView: WebView,
+        handle: AutomationHandle,
+        callback: (ReplySnapshot?) -> Unit
+    ) {
+        evaluateJson(webView, buildSnapshotScript(platform), handle) { json ->
+            callback(
+                json?.let {
+                    ReplySnapshot(
+                        text = it.optString("text").trim(),
+                        count = it.optInt("count", 0),
+                        loading = it.optBoolean("loading", false),
+                        inputFound = it.optBoolean("inputFound", false),
+                        loginLikely = it.optBoolean("loginLikely", false),
+                        url = it.optString("url")
+                    )
+                }
+            )
+        }
+    }
+
+    private fun buildReadyScript(platform: AiPlatformDefinition): String {
+        val inputs = JSONArray(platform.inputSelectors).toString()
         return """
-(function() {
-    try {
-        var msgs = [];
-        var selectors = [
-            'p', 'div.message', 'div.chat-item', '.conversation-item', '.message-item',
-            '.content', '.markdown-body', '.ds-markdown', '.message-content',
-            '[class*="message"]', '[class*="chat"]', '[class*="response"]',
-            '[data-testid*="message"]', '[data-message]', '.ai-message', '.bot-message',
-            '. YuanbaoResponse', '[data-testid="assistant-content"]'
-        ];
-        var seen = new Set();
-        for (var s = 0; s < selectors.length; s++) {
-            var all = document.querySelectorAll(selectors[s]);
-            for (var i = 0; i < all.length; i++) {
-                var el = all[i];
-                if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable) continue;
-                var t = (el.innerText || el.textContent || '').trim();
-                if (t.length > 5 && !seen.has(t)) {
-                    seen.add(t);
-                    msgs.push({tag: el.tagName, text: t.substring(0, 500)});
-                }
-            }
-        }
-        return JSON.stringify({success: true, title: document.title, url: window.location.href, messages: msgs, count: msgs.length});
-    } catch(e) {
-        return JSON.stringify({success: false, error: e.message});
+(function(){
+  try {
+    var inputSelectors = $inputs;
+    function roots(){
+      var result=[document], queue=[document];
+      while(queue.length){
+        var root=queue.shift();
+        var all=root.querySelectorAll ? root.querySelectorAll('*') : [];
+        for(var i=0;i<all.length;i++) if(all[i].shadowRoot){ result.push(all[i].shadowRoot); queue.push(all[i].shadowRoot); }
+      }
+      return result;
     }
-})();
+    function usable(el){
+      if(!el || el.disabled || el.getAttribute('aria-disabled')==='true') return false;
+      var style=getComputedStyle(el);
+      return !el.hidden && style.display!=='none' && style.visibility!=='hidden';
+    }
+    function first(selectors){
+      var rs=roots();
+      for(var s=0;s<selectors.length;s++) for(var r=0;r<rs.length;r++){
+        var el=rs[r].querySelector(selectors[s]); if(usable(el)) return el;
+      }
+      return null;
+    }
+    var body=(document.body && document.body.innerText || '').toLowerCase();
+    var loginLikely=/登录|登錄|sign in|log in|扫码|掃碼|verify your account/.test(body);
+    return JSON.stringify({
+      inputFound: !!first(inputSelectors),
+      readyState: document.readyState,
+      loginLikely: loginLikely,
+      title: document.title || '',
+      url: location.href
+    });
+  }catch(e){ return JSON.stringify({error:String(e), url:location.href}); }
+})()
 """.trimIndent()
     }
 
-    fun getDiagnoseScript(): String {
+    private fun buildFillScript(platform: AiPlatformDefinition, message: String): String {
+        val inputs = JSONArray(platform.inputSelectors).toString()
+        val text = JSONObject.quote(message)
         return """
-(function() {
-    try {
-        var r = {
-            textareas: document.querySelectorAll('textarea').length,
-            contenteditables: document.querySelectorAll('[contenteditable="true"]').length,
-            buttons: document.querySelectorAll('button').length,
-            inputs: document.querySelectorAll('input').length,
-            title: document.title,
-            url: window.location.href,
-            viewportW: window.innerWidth,
-            viewportH: window.innerHeight,
-            userAgent: navigator.userAgent
-        };
-        var btnTexts = [];
-        document.querySelectorAll('button').forEach(function(b) {
-            var t = (b.innerText || b.textContent || '').trim();
-            if (t.length > 0 && t.length < 30) btnTexts.push(t);
-        });
-        r.buttonTexts = btnTexts.slice(0, 20);
-        var visTas = [];
-        document.querySelectorAll('textarea').forEach(function(ta) {
-            if (ta.offsetParent !== null) visTas.push(ta.placeholder || 'no-placeholder');
-        });
-        r.visibleTextareas = visTas;
-        r.possibleInputs = [];
-        ['textarea', '[contenteditable]', 'input[type="text"]', '[data-slate-editor]'].forEach(function(sel) {
-            document.querySelectorAll(sel).forEach(function(el) {
-                if (el.offsetParent !== null) {
-                    r.possibleInputs.push({
-                        tag: el.tagName,
-                        placeholder: el.placeholder || '',
-                        isContentEditable: el.isContentEditable,
-                        valuePreview: (el.value || el.textContent || '').substring(0, 50)
-                    });
-                }
-            });
-        });
-        return JSON.stringify(r);
-    } catch(e) {
-        return JSON.stringify({error: e.message});
+(function(){
+  try {
+    var selectors=$inputs, text=$text;
+    function roots(){
+      var result=[document], queue=[document];
+      while(queue.length){
+        var root=queue.shift(), all=root.querySelectorAll ? root.querySelectorAll('*') : [];
+        for(var i=0;i<all.length;i++) if(all[i].shadowRoot){ result.push(all[i].shadowRoot); queue.push(all[i].shadowRoot); }
+      }
+      return result;
     }
-})();
+    function usable(el){
+      if(!el || el.disabled || el.getAttribute('aria-disabled')==='true') return false;
+      var style=getComputedStyle(el);
+      return !el.hidden && style.display!=='none' && style.visibility!=='hidden';
+    }
+    function first(){
+      var rs=roots();
+      for(var s=0;s<selectors.length;s++) for(var r=0;r<rs.length;r++){
+        var el=rs[r].querySelector(selectors[s]); if(usable(el)) return el;
+      }
+      return null;
+    }
+    var input=first();
+    if(!input) return JSON.stringify({success:false,error:'Message input not found'});
+    input.focus();
+    try{ input.click(); }catch(ignore){}
+
+    if(input.tagName==='TEXTAREA' || input.tagName==='INPUT'){
+      var proto=input.tagName==='TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      var descriptor=Object.getOwnPropertyDescriptor(proto,'value');
+      if(descriptor && descriptor.set) descriptor.set.call(input,text); else input.value=text;
+      input.dispatchEvent(new InputEvent('beforeinput',{bubbles:true,cancelable:true,data:text,inputType:'insertText'}));
+      input.dispatchEvent(new InputEvent('input',{bubbles:true,data:text,inputType:'insertText'}));
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+    }else{
+      var selection=window.getSelection(), range=document.createRange();
+      range.selectNodeContents(input); range.collapse(false);
+      selection.removeAllRanges(); selection.addRange(range);
+      var inserted=false;
+      try{
+        document.execCommand('selectAll',false,null);
+        inserted=document.execCommand('insertText',false,text);
+      }catch(ignore){}
+      var actual=(input.innerText || input.textContent || '').trim();
+      if(!inserted || actual!==text.trim()){
+        input.innerHTML='';
+        input.appendChild(document.createTextNode(text));
+        actual=(input.innerText || input.textContent || '').trim();
+      }
+      if(actual!==text.trim()){
+        try{
+          var dt=new DataTransfer(); dt.setData('text/plain',text);
+          input.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:dt}));
+        }catch(ignore){}
+      }
+      input.dispatchEvent(new InputEvent('beforeinput',{bubbles:true,cancelable:true,data:text,inputType:'insertText'}));
+      input.dispatchEvent(new InputEvent('input',{bubbles:true,data:text,inputType:'insertText'}));
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+    return JSON.stringify({success:true,value:(input.value || input.innerText || input.textContent || '')});
+  }catch(e){ return JSON.stringify({success:false,error:String(e)}); }
+})()
 """.trimIndent()
     }
+
+    private fun buildSubmitScript(platform: AiPlatformDefinition): String {
+        val inputs = JSONArray(platform.inputSelectors).toString()
+        val buttons = JSONArray(platform.sendButtonSelectors).toString()
+        return """
+(function(){
+  try{
+    var inputSelectors=$inputs, buttonSelectors=$buttons;
+    function roots(){
+      var result=[document], queue=[document];
+      while(queue.length){
+        var root=queue.shift(), all=root.querySelectorAll ? root.querySelectorAll('*') : [];
+        for(var i=0;i<all.length;i++) if(all[i].shadowRoot){ result.push(all[i].shadowRoot); queue.push(all[i].shadowRoot); }
+      }
+      return result;
+    }
+    function usable(el){
+      if(!el || el.disabled || el.getAttribute('aria-disabled')==='true') return false;
+      var style=getComputedStyle(el);
+      return !el.hidden && style.display!=='none' && style.visibility!=='hidden';
+    }
+    function first(selectors){
+      var rs=roots();
+      for(var s=0;s<selectors.length;s++) for(var r=0;r<rs.length;r++){
+        var el=rs[r].querySelector(selectors[s]); if(usable(el)) return el;
+      }
+      return null;
+    }
+    var button=first(buttonSelectors);
+    if(button){
+      try{ button.focus(); }catch(ignore){}
+      try{ button.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true})); }catch(ignore){}
+      try{ button.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true})); }catch(ignore){}
+      button.click();
+      return JSON.stringify({success:true,method:'button'});
+    }
+    var input=first(inputSelectors);
+    if(!input) return JSON.stringify({success:false,error:'Neither send button nor message input is available'});
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true}));
+    input.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true}));
+    return JSON.stringify({success:true,method:'enter'});
+  }catch(e){ return JSON.stringify({success:false,error:String(e)}); }
+})()
+""".trimIndent()
+    }
+
+    private fun buildSnapshotScript(platform: AiPlatformDefinition): String {
+        val inputs = JSONArray(platform.inputSelectors).toString()
+        val replies = JSONArray(platform.assistantMessageSelectors).toString()
+        val loading = JSONArray(platform.loadingSelectors).toString()
+        return """
+(function(){
+  try{
+    var inputSelectors=$inputs, replySelectors=$replies, loadingSelectors=$loading;
+    function roots(){
+      var result=[document], queue=[document];
+      while(queue.length){
+        var root=queue.shift(), all=root.querySelectorAll ? root.querySelectorAll('*') : [];
+        for(var i=0;i<all.length;i++) if(all[i].shadowRoot){ result.push(all[i].shadowRoot); queue.push(all[i].shadowRoot); }
+      }
+      return result;
+    }
+    function usable(el){
+      if(!el) return false;
+      var style=getComputedStyle(el);
+      return !el.hidden && style.display!=='none' && style.visibility!=='hidden';
+    }
+    var rs=roots(), messages=[], seen=new Set(), inputFound=false, isLoading=false;
+    for(var s=0;s<inputSelectors.length;s++) for(var r=0;r<rs.length;r++){
+      var input=rs[r].querySelector(inputSelectors[s]); if(usable(input)) inputFound=true;
+    }
+    for(var s=0;s<loadingSelectors.length;s++) for(var r=0;r<rs.length;r++){
+      var nodes=rs[r].querySelectorAll(loadingSelectors[s]);
+      for(var n=0;n<nodes.length;n++) if(usable(nodes[n])) isLoading=true;
+    }
+    for(var s=0;s<replySelectors.length;s++) for(var r=0;r<rs.length;r++){
+      var nodes=rs[r].querySelectorAll(replySelectors[s]);
+      for(var n=0;n<nodes.length;n++){
+        var el=nodes[n]; if(!usable(el)) continue;
+        if(el.tagName==='TEXTAREA' || el.tagName==='INPUT' || el.isContentEditable) continue;
+        if(el.closest && el.closest("[data-role='user'],[data-message-author-role='user'],[data-testid*='user'],[class*='user-message'],[class*='message-user']")) continue;
+        var text=(el.innerText || el.textContent || '').replace(/\u00a0/g,' ').trim();
+        if(text && !seen.has(text)){ seen.add(text); messages.push(text); }
+      }
+    }
+    var body=(document.body && document.body.innerText || '').toLowerCase();
+    return JSON.stringify({
+      text: messages.length ? messages[messages.length-1] : '',
+      count: messages.length,
+      loading: isLoading,
+      inputFound: inputFound,
+      loginLikely: /登录|登錄|sign in|log in|扫码|掃碼|verify your account/.test(body),
+      url: location.href
+    });
+  }catch(e){ return JSON.stringify({error:String(e),url:location.href}); }
+})()
+""".trimIndent()
+    }
+
+    fun getExtractScript(): String = """
+(function(){
+  try{
+    var selectors=['[data-role="assistant"]','[data-message-author-role="assistant"]','[data-testid*="assistant"]','.ds-markdown','.qwen-markdown','.markdown-body','.ai-message','.bot-message'];
+    var messages=[], seen=new Set();
+    selectors.forEach(function(selector){
+      document.querySelectorAll(selector).forEach(function(el){
+        if(el.tagName==='TEXTAREA' || el.tagName==='INPUT' || el.isContentEditable) return;
+        var text=(el.innerText || el.textContent || '').trim();
+        if(text && !seen.has(text)){ seen.add(text); messages.push(text); }
+      });
+    });
+    return JSON.stringify({success:true,title:document.title,url:location.href,messages:messages,count:messages.length});
+  }catch(e){ return JSON.stringify({success:false,error:String(e)}); }
+})()
+""".trimIndent()
+
+    fun getDiagnoseScript(): String = """
+(function(){
+  try{
+    var r={title:document.title,url:location.href,readyState:document.readyState,userAgent:navigator.userAgent};
+    r.textareas=document.querySelectorAll('textarea').length;
+    r.contenteditables=document.querySelectorAll('[contenteditable="true"]').length;
+    r.buttons=document.querySelectorAll('button').length;
+    r.inputs=document.querySelectorAll('input').length;
+    r.buttonTexts=[];
+    document.querySelectorAll('button').forEach(function(b){ var t=(b.innerText||b.textContent||'').trim(); if(t && t.length<50) r.buttonTexts.push(t); });
+    return JSON.stringify(r);
+  }catch(e){ return JSON.stringify({error:String(e)}); }
+})()
+""".trimIndent()
 
     fun injectJs(webView: WebView, script: String, callback: ((String) -> Unit)? = null) {
-        if (callback != null) {
-            webView.evaluateJavascript(script) { raw ->
-                val clean = if (raw != null && raw.startsWith("\"") && raw.endsWith("\"")) {
-                    raw.substring(1, raw.length - 1)
-                        .replace("\\\"", "\"")
-                        .replace("\\\\", "\\")
-                } else raw ?: "null"
-                callback(clean)
-            }
-        } else {
-            webView.evaluateJavascript(script, null)
+        webView.evaluateJavascript(script) { raw ->
+            callback?.invoke(decodeJavascriptValue(raw))
         }
     }
 
-    fun autoSendMessage(webView: WebView, message: String, callback: ((Boolean, String) -> Unit)? = null) {
-        webView.evaluateJavascript("(function(){return window.location.href})()") { url ->
-            val tag = when {
-                url?.contains("doubao") == true -> "doubao"
-                url?.contains("yuanbao") == true -> "yuanbao"
-                else -> "generic"
-            }
-            fillAndSend(tag, webView, message) { result ->
-                val success = !result.startsWith("ERROR") && !result.startsWith("解析失败")
-                callback?.let { it(success, result) }
+    fun autoSendMessage(
+        webView: WebView,
+        message: String,
+        callback: ((Boolean, String) -> Unit)? = null
+    ) {
+        webView.evaluateJavascript("(function(){return location.href})()") { rawUrl ->
+            val platform = AiPlatformRegistry.detect(decodeJavascriptValue(rawUrl))
+            sendAndAwaitReply(platform.id, webView, message) { result ->
+                callback?.invoke(
+                    result.success,
+                    if (result.success) result.response else result.detail
+                )
             }
         }
     }
 
     fun extractChat(webView: WebView, callback: ((String) -> Unit)? = null) {
         injectJs(webView, getExtractScript(), callback)
+    }
+
+    // Compatibility entry points retained for existing callers.
+    fun sendToDoubao(webView: WebView, text: String, onResult: (String) -> Unit) {
+        sendAndAwaitReply("doubao", webView, text) { result ->
+            onResult(if (result.success) "REPLY:${result.response}" else "ERROR:${result.detail}")
+        }
+    }
+
+    fun fillAndSend(tag: String, webView: WebView, text: String, onResult: (String) -> Unit) {
+        sendAndAwaitReply(tag, webView, text) { result ->
+            onResult(if (result.success) "REPLY:${result.response}" else "ERROR:${result.detail}")
+        }
+    }
+
+    fun getAutoChatScript(message: String): String =
+        buildFillScript(AiPlatformRegistry.generic(), message)
+
+    private fun evaluateJson(
+        webView: WebView,
+        script: String,
+        handle: AutomationHandle,
+        callback: (JSONObject?) -> Unit
+    ) {
+        if (handle.isCancelled()) return
+        webView.evaluateJavascript(script) { raw ->
+            if (handle.isCancelled()) return@evaluateJavascript
+            val decoded = decodeJavascriptValue(raw)
+            callback(runCatching { JSONObject(decoded) }.getOrNull())
+        }
+    }
+
+    private fun decodeJavascriptValue(raw: String?): String {
+        if (raw == null || raw == "null" || raw == "undefined") return ""
+        return if (raw.startsWith('"') && raw.endsWith('"')) {
+            runCatching { JSONArray("[$raw]").getString(0) }.getOrElse {
+                raw.substring(1, raw.length - 1)
+                    .replace("\\\"", "\"")
+                    .replace("\\n", "\n")
+                    .replace("\\\\", "\\")
+            }
+        } else {
+            raw
+        }
     }
 }

@@ -3,25 +3,28 @@ package com.qtwl.YitongAIzhuanzhan
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
-import android.webkit.*
+import android.os.Handler
+import android.os.Looper
 import android.view.ViewGroup
-import androidx.compose.runtime.*
-import java.io.*
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import com.qtwl.YitongAIzhuanzhan.ui.screens.GatewayPrefs
+import java.util.concurrent.CopyOnWriteArraySet
 
-// 桌面UA，骗过移动端限制
+// Desktop UA prevents several AI sites from forcing reduced mobile pages.
 const val USER_AGENT_DESKTOP =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
-/**
- * WebView 多实例管理器
- * 每个 Tab 拥有独立的 WebView 实例，独立 Cookie 存储
- */
 data class WebViewTab(
     val id: Int,
     var url: String,
     var title: String,
+    var platformId: String? = null,
     var canGoBack: Boolean = false,
     var canGoForward: Boolean = false,
     var isLoading: Boolean = false,
@@ -29,28 +32,75 @@ data class WebViewTab(
     var webView: WebView? = null
 )
 
+/**
+ * Owns every browser tab and WebView used by both the visible browser and the
+ * multi-AI pipeline. Pipeline stages receive a dedicated tab per platform, and
+ * switching stages also switches the visible browser so WebViews remain active.
+ */
 object WebViewManager {
     private val tabs = mutableListOf<WebViewTab>()
+    private val listeners = CopyOnWriteArraySet<() -> Unit>()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var tabCounter = 0
     private var currentTabIndex = 0
 
-    fun createTab(context: Context, url: String = "https://www.doubao.com"): WebViewTab {
+    fun addListener(listener: () -> Unit) {
+        listeners.add(listener)
+    }
+
+    fun removeListener(listener: () -> Unit) {
+        listeners.remove(listener)
+    }
+
+    private fun notifyChanged() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            listeners.forEach { it.invoke() }
+        } else {
+            mainHandler.post { listeners.forEach { it.invoke() } }
+        }
+    }
+
+    fun createTab(
+        context: Context,
+        url: String = "https://www.doubao.com",
+        platformId: String? = AiPlatformRegistry.detect(url).id.takeUnless { it == "generic" }
+    ): WebViewTab {
         tabCounter++
         val tab = WebViewTab(
             id = tabCounter,
             url = url,
-            title = ""
+            title = "",
+            platformId = platformId
         )
         tabs.add(tab)
-        currentTabIndex = tabs.size - 1
+        currentTabIndex = tabs.lastIndex
+        notifyChanged()
         return tab
     }
 
-    fun initWebView(context: Context, tabId: Int, onStateChange: () -> Unit) {
-        val tab = tabs.find { it.id == tabId } ?: return
-        if (tab.webView != null) return
+    /** Returns an existing tab for a platform or creates and initialises one. */
+    fun getOrCreatePlatformTab(context: Context, platform: AiPlatformDefinition): WebViewTab {
+        val existingIndex = tabs.indexOfFirst { tab ->
+            tab.platformId == platform.id || AiPlatformRegistry.detect(tab.url).id == platform.id
+        }
+        val tab = if (existingIndex >= 0) {
+            tabs[existingIndex].also { it.platformId = platform.id }
+        } else {
+            createTab(context, platform.url, platform.id)
+        }
+        val index = tabs.indexOfFirst { it.id == tab.id }
+        if (index >= 0) currentTabIndex = index
+        initWebView(context, tab.id)
+        notifyChanged()
+        return tab
+    }
 
-        @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint("SetJavaScriptEnabled")
+    fun initWebView(context: Context, tabId: Int): WebView? {
+        val tab = tabs.find { it.id == tabId } ?: return null
+        tab.webView?.let { return it }
+
+        val appContext = context.applicationContext
         val wv = WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -72,93 +122,112 @@ object WebViewManager {
             settings.cacheMode = WebSettings.LOAD_DEFAULT
             settings.databaseEnabled = true
             settings.allowContentAccess = true
-            settings.textZoom = GatewayPrefs.getTextZoom(context)
+            settings.textZoom = GatewayPrefs.getTextZoom(appContext)
 
-            // Cookie 持久化
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-            // 恢复保存的 Cookie
-            PersistentCookieJar(context).restore()
+            PersistentCookieJar(appContext).restore()
 
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     tab.isLoading = true
-                    url?.let { tab.url = it }
-                    onStateChange()
+                    tab.progress = 0
+                    url?.let {
+                        tab.url = it
+                        val detected = AiPlatformRegistry.detect(it)
+                        if (detected.id != "generic") tab.platformId = detected.id
+                    }
+                    notifyChanged()
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     tab.isLoading = false
-                    tab.title = view?.title ?: ""
+                    tab.progress = 100
+                    tab.title = view?.title.orEmpty()
                     tab.canGoBack = view?.canGoBack() ?: false
                     tab.canGoForward = view?.canGoForward() ?: false
-                    // 保存 Cookie
                     CookieManager.getInstance().flush()
-                    PersistentCookieJar(context).save()
-                    onStateChange()
+                    PersistentCookieJar(appContext).save()
+                    notifyChanged()
                 }
 
-                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                    return false
-                }
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    request: WebResourceRequest?
+                ): Boolean = false
             }
 
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                     tab.progress = newProgress
-                    if (newProgress == 100) tab.isLoading = false
-                    onStateChange()
+                    tab.isLoading = newProgress < 100
+                    notifyChanged()
                 }
 
                 override fun onReceivedTitle(view: WebView?, title: String?) {
                     super.onReceivedTitle(view, title)
-                    tab.title = title ?: ""
-                    onStateChange()
+                    tab.title = title.orEmpty()
+                    notifyChanged()
                 }
             }
-
-            loadUrl(tab.url)
         }
         tab.webView = wv
+        if (tab.url.isNotBlank()) wv.loadUrl(tab.url)
+        notifyChanged()
+        return wv
     }
 
     fun getCurrentTab(): WebViewTab? = tabs.getOrNull(currentTabIndex)
     fun getTab(index: Int): WebViewTab? = tabs.getOrNull(index)
+    fun getTabById(tabId: Int): WebViewTab? = tabs.firstOrNull { it.id == tabId }
     fun getTabCount(): Int = tabs.size
     fun getCurrentIndex(): Int = currentTabIndex
 
     fun switchTab(index: Int): Boolean {
-        if (index < 0 || index >= tabs.size) return false
+        if (index !in tabs.indices) return false
         currentTabIndex = index
+        notifyChanged()
         return true
     }
 
-    fun addTab(context: Context, url: String = "https://www.google.com"): WebViewTab {
-        return createTab(context, url)
+    fun switchToTabId(tabId: Int): Boolean {
+        val index = tabs.indexOfFirst { it.id == tabId }
+        return switchTab(index)
     }
 
+    fun addTab(context: Context, url: String = "https://www.google.com"): WebViewTab =
+        createTab(context, url)
+
     fun closeTab(index: Int): Boolean {
-        if (tabs.size <= 1) return false
-        if (index < 0 || index >= tabs.size) return false
-        tabs[index].webView?.destroy()
+        if (tabs.size <= 1 || index !in tabs.indices) return false
+        tabs[index].webView?.let { webView ->
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            webView.destroy()
+        }
         tabs.removeAt(index)
-        // 修复：关闭前面的标签页时，当前索引要跟着减1
         if (index < currentTabIndex) {
             currentTabIndex--
         } else if (currentTabIndex >= tabs.size) {
-            currentTabIndex = tabs.size - 1
+            currentTabIndex = tabs.lastIndex
         }
+        notifyChanged()
         return true
     }
 
     fun getTabs(): List<WebViewTab> = tabs.toList()
 
     fun destroyAll() {
-        tabs.forEach { it.webView?.destroy() }
+        tabs.forEach { tab ->
+            tab.webView?.let { webView ->
+                (webView.parent as? ViewGroup)?.removeView(webView)
+                webView.destroy()
+            }
+        }
         tabs.clear()
         tabCounter = 0
         currentTabIndex = 0
+        notifyChanged()
     }
 }

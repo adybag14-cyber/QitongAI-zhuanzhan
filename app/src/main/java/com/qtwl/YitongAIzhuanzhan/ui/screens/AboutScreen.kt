@@ -49,6 +49,7 @@ fun AboutScreen(
     val currentLang = remember { LocaleManager.getLanguageIndex(context) }
     val restoredDefaultMessage = stringResource(R.string.restored_default)
     val qqGroupCopiedMessage = stringResource(R.string.qq_group_copied)
+    val qqGroupClipLabel = stringResource(R.string.qq_group_number_clip_label)
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -142,7 +143,7 @@ fun AboutScreen(
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://qun.qq.com/universal-share/share?ac=1&authKey=P6t4V0S6cBsy920xxtTreRUIl%2Fko0SNlgYcpPQEXfrCz2Vg01NkzELCORtbHHtuJ&busi_data=eyJncm91cENvZGUiOiIxMDA3NDg4NTM1IiwidG9rZW4iOiJaWUlBKzFPSUozYWhVSU1FRzJmYTN3RmZYcHVlU1pSSnp4MUg3NjhPUUVkemJJSWJOTENja3I4ZFNYU01BTE9MIiwidWluIjoiMzA4OTY5MTQzNiJ9&data=xwEXQKNx2cIbFUY0dByPQV1l7BxvDJWiwEJfDW-YNTFRpOGChmWJrh_4tbRSuHjz01Hn4_ycXC2aa-uY3fKWqQ&svctype=4&tempid=h5_group_info")))
                     } catch (e: Exception) {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.qq_group_number_clip_label), "1007488535"))
+                        clipboard.setPrimaryClip(ClipData.newPlainText(qqGroupClipLabel, "1007488535"))
                         Toast.makeText(context, qqGroupCopiedMessage, Toast.LENGTH_SHORT).show()
                     }
                 }, isDark)
