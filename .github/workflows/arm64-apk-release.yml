@@ -1,4 +1,4 @@
-﻿name: Native ARM64 APK build and release
+name: Native ARM64 APK build and release
 
 on:
   workflow_dispatch:
@@ -30,7 +30,7 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Record native runner and Android SDK details
+      - name: Resolve native runner and Android SDK
         shell: bash
         run: |
           set -euxo pipefail
@@ -39,12 +39,56 @@ jobs:
           test "$(uname -m)" = "aarch64"
           lscpu
           java -version
-          echo "ANDROID_HOME=${ANDROID_HOME:-}"
-          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
-          test -n "${ANDROID_HOME:-}"
-          test -d "$ANDROID_HOME/platforms/android-35"
-          test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version || true
+          echo "Initial ANDROID_HOME=${ANDROID_HOME:-}"
+          echo "Initial ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
+
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK_ROOT" ]; then
+            for candidate in \
+              /usr/local/lib/android/sdk \
+              /opt/android-sdk \
+              /opt/android-sdk-linux \
+              "$HOME/Android/Sdk"; do
+              if [ -d "$candidate/platforms/android-35" ]; then
+                SDK_ROOT="$candidate"
+                break
+              fi
+            done
+          fi
+
+          if [ -z "$SDK_ROOT" ]; then
+            PLATFORM_DIR=$(find /usr/local /opt "$HOME" -maxdepth 7 -type d -path '*/platforms/android-35' -print -quit 2>/dev/null || true)
+            if [ -n "$PLATFORM_DIR" ]; then
+              SDK_ROOT="${PLATFORM_DIR%/platforms/android-35}"
+            fi
+          fi
+
+          if [ -z "$SDK_ROOT" ]; then
+            echo "No Android SDK containing platforms/android-35 was found." >&2
+            echo "Candidate Android-related directories:" >&2
+            find /usr/local /opt "$HOME" -maxdepth 5 -type d \( -iname '*android*' -o -iname '*sdk*' \) -print 2>/dev/null | head -n 200 >&2 || true
+            exit 1
+          fi
+
+          test -d "$SDK_ROOT/platforms/android-35"
+          BUILD_TOOLS_DIR=$(find "$SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d -name '35.*' | sort -V | tail -n1)
+          test -n "$BUILD_TOOLS_DIR"
+          test -x "$BUILD_TOOLS_DIR/apksigner"
+
+          export ANDROID_HOME="$SDK_ROOT"
+          export ANDROID_SDK_ROOT="$SDK_ROOT"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "APKSIGNER_PATH=$BUILD_TOOLS_DIR/apksigner" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$BUILD_TOOLS_DIR" >> "$GITHUB_PATH"
+
+          echo "Resolved Android SDK: $SDK_ROOT"
+          echo "Resolved build tools: $BUILD_TOOLS_DIR"
+          SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -type f -path '*/bin/sdkmanager' -print -quit 2>/dev/null || true)
+          if [ -n "$SDKMANAGER" ]; then
+            "$SDKMANAGER" --version || true
+          fi
 
       - name: Build unsigned release and installable debug APKs
         shell: bash
@@ -67,7 +111,7 @@ jobs:
 
           UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
           DEBUG="app/build/outputs/apk/debug/app-debug.apk"
-          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          APKSIGNER="$APKSIGNER_PATH"
 
           test -f "$UNSIGNED"
           test -f "$DEBUG"
@@ -175,7 +219,7 @@ jobs:
           - Debug APK: verified signed with the workflow runner's temporary debug certificate
           - JVM unit tests: passed
           - Android lint: passed
-          - Release and debug assembly: passed
+          - Release, debug, and instrumentation-test APK assembly: passed
 
           Verify downloads with SHA256SUMS.txt. Detailed runner and signing information is in BUILD-INFO.txt and debug-signing-certificate.txt.
           EOF
@@ -186,4 +230,3 @@ jobs:
             --verify-tag \
             --title "QiTong AI Station ${VERSION_NAME} ARM64 test build" \
             --notes-file release-notes.md
-
