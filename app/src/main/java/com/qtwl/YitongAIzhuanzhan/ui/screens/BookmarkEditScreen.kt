@@ -18,10 +18,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.qtwl.YitongAIzhuanzhan.Bookmark
 import com.qtwl.YitongAIzhuanzhan.BookmarkManager
+import com.qtwl.YitongAIzhuanzhan.R
 import com.qtwl.YitongAIzhuanzhan.ui.components.GlassCard
 import com.qtwl.YitongAIzhuanzhan.ui.theme.*
 
@@ -42,15 +44,15 @@ fun BookmarkEditScreen(
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
-                title = { Text("收藏管理", fontWeight = FontWeight.SemiBold) },
+                title = { Text(stringResource(R.string.bookmarks_title), fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
                 actions = {
                     IconButton(onClick = { showAddDialog = true }) {
-                        Icon(Icons.Filled.Add, contentDescription = "添加收藏")
+                        Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.add_bookmark))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -85,7 +87,7 @@ fun BookmarkEditScreen(
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("添加收藏")
+                    Text(stringResource(R.string.add_bookmark))
                 }
                 OutlinedButton(
                     onClick = {
@@ -100,7 +102,7 @@ fun BookmarkEditScreen(
                 ) {
                     Icon(Icons.Outlined.Restore, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("恢复默认")
+                    Text(stringResource(R.string.restore_default))
                 }
             }
 
@@ -119,7 +121,7 @@ fun BookmarkEditScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                "暂无收藏",
+                                stringResource(R.string.no_bookmarks),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel
                             )
@@ -149,7 +151,7 @@ fun BookmarkEditScreen(
             Spacer(Modifier.height(16.dp))
 
             Text(
-                text = "共 ${bookmarks.size} 个收藏",
+                text = stringResource(R.string.bookmarks_total, bookmarks.size),
                 style = MaterialTheme.typography.bodySmall,
                 color = if (isDark) AppleTertiaryLabelDark else AppleTertiaryLabel,
                 modifier = Modifier.fillMaxWidth()
@@ -219,7 +221,7 @@ private fun BookmarkEditItem(
         IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
             Icon(
                 Icons.Outlined.Edit,
-                contentDescription = "编辑",
+                contentDescription = stringResource(R.string.edit),
                 tint = if (isDark) AppleBlueLight else AppleBlue,
                 modifier = Modifier.size(18.dp)
             )
@@ -227,7 +229,7 @@ private fun BookmarkEditItem(
         IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
             Icon(
                 Icons.Outlined.Delete,
-                contentDescription = "删除",
+                contentDescription = stringResource(R.string.delete),
                 tint = Color.Red.copy(alpha = 0.7f),
                 modifier = Modifier.size(18.dp)
             )
@@ -250,7 +252,7 @@ private fun BookmarkEditDialog(
         containerColor = if (isDark) GlassBackgroundDark else GlassBackground,
         title = {
             Text(
-                text = if (bookmark == null) "添加收藏" else "编辑收藏",
+                text = if (bookmark == null) stringResource(R.string.add_bookmark) else stringResource(R.string.edit_bookmark),
                 fontWeight = FontWeight.SemiBold
             )
         },
@@ -259,7 +261,7 @@ private fun BookmarkEditDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("名称") },
+                    label = { Text(stringResource(R.string.bookmark_name)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
@@ -274,7 +276,7 @@ private fun BookmarkEditDialog(
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    label = { Text("网址") },
+                    label = { Text(stringResource(R.string.website)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
@@ -294,12 +296,12 @@ private fun BookmarkEditDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = AppleBlue),
                 shape = RoundedCornerShape(10.dp)
             ) {
-                Text("保存")
+                Text(stringResource(R.string.save))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         }
     )

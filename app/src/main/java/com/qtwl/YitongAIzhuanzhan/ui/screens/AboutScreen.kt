@@ -47,6 +47,9 @@ fun AboutScreen(
     val context = LocalContext.current
     val scrollState = rememberScrollState()
     val currentLang = remember { LocaleManager.getLanguageIndex(context) }
+    val restoredDefaultMessage = stringResource(R.string.restored_default)
+    val qqGroupCopiedMessage = stringResource(R.string.qq_group_copied)
+    val qqGroupClipLabel = stringResource(R.string.qq_group_number_clip_label)
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -96,14 +99,14 @@ fun AboutScreen(
             Spacer(Modifier.height(20.dp))
 
             // 收藏管理 - 可点击
-            SectionTitle("收藏管理", Icons.Outlined.Bookmarks, isDark)
+            SectionTitle(stringResource(R.string.bookmarks_title), Icons.Outlined.Bookmarks, isDark)
             GlassCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), elevation = 2.dp) {
                 Column {
-                    LinkItem(Icons.Outlined.BookmarkAdd, "收藏列表", "${BookmarkManager.getBookmarks(context).size} 个收藏", onNavigateToBookmarks, isDark)
+                    LinkItem(Icons.Outlined.BookmarkAdd, stringResource(R.string.bookmarks_list), stringResource(R.string.bookmark_count, BookmarkManager.getBookmarks(context).size), onNavigateToBookmarks, isDark)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = if (isDark) GlassBorderDark else GlassBorder)
-                    LinkItem(Icons.Outlined.Restore, "恢复默认收藏", "重置为预设AI平台列表", {
+                    LinkItem(Icons.Outlined.Restore, stringResource(R.string.restore_default_bookmarks), stringResource(R.string.restore_default_bookmarks_desc), {
                         BookmarkManager.resetToDefault(context)
-                        Toast.makeText(context, "已恢复默认", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, restoredDefaultMessage, Toast.LENGTH_SHORT).show()
                     }, isDark)
                 }
             }
@@ -140,8 +143,8 @@ fun AboutScreen(
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://qun.qq.com/universal-share/share?ac=1&authKey=P6t4V0S6cBsy920xxtTreRUIl%2Fko0SNlgYcpPQEXfrCz2Vg01NkzELCORtbHHtuJ&busi_data=eyJncm91cENvZGUiOiIxMDA3NDg4NTM1IiwidG9rZW4iOiJaWUlBKzFPSUozYWhVSU1FRzJmYTN3RmZYcHVlU1pSSnp4MUg3NjhPUUVkemJJSWJOTENja3I4ZFNYU01BTE9MIiwidWluIjoiMzA4OTY5MTQzNiJ9&data=xwEXQKNx2cIbFUY0dByPQV1l7BxvDJWiwEJfDW-YNTFRpOGChmWJrh_4tbRSuHjz01Hn4_ycXC2aa-uY3fKWqQ&svctype=4&tempid=h5_group_info")))
                     } catch (e: Exception) {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("QQ群号", "1007488535"))
-                        Toast.makeText(context, "群号已复制", Toast.LENGTH_SHORT).show()
+                        clipboard.setPrimaryClip(ClipData.newPlainText(qqGroupClipLabel, "1007488535"))
+                        Toast.makeText(context, qqGroupCopiedMessage, Toast.LENGTH_SHORT).show()
                     }
                 }, isDark)
             }

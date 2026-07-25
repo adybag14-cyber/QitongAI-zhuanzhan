@@ -1,32 +1,148 @@
 {
+  "schemaVersion": 2,
   "platforms": {
     "doubao": {
-      "url": "https://www.doubao.com/chat",
-      "tag": "doubao",
-      "engine": "react_textarea",
-      "input": "textarea[data-testid='chat_input_input'], textarea[placeholder*='输入消息']",
-      "fillStrategy": "prototype_setter_plus_input_event",
-      "sendStrategy": "enter_then_button#flow-end-msg-send",
-      "sendButton": "#flow-end-msg-send, button[aria-label*='发送']",
-      "reply": ".message-bubble:last-child .markdown-body, [data-testid='message_text_content']:last-child",
-      "loading": ".loading-spinner, [aria-busy=true]",
-      "note": "发送按钮条件渲染，必须先填字再等400ms；不要走Slate逻辑",
-      "delays": {
-        "afterFillMs": [400, 800],
-        "afterSendMs": [600, 1200]
-      }
+      "url": "https://www.doubao.com/chat/",
+      "input": [
+        "textarea[data-testid='chat_input_input']",
+        "textarea[placeholder*='输入消息']",
+        "textarea[placeholder*='message']",
+        "textarea"
+      ],
+      "sendButton": [
+        "#flow-end-msg-send",
+        "button[data-testid*='send']",
+        "button[aria-label*='发送']",
+        "button[aria-label*='Send']"
+      ],
+      "assistantMessage": [
+        "[data-testid='message_text_content']",
+        ".message-bubble .markdown-body",
+        "[data-testid*='assistant'] .markdown-body",
+        "[data-role='assistant']"
+      ],
+      "loading": [
+        "[aria-busy='true']",
+        ".loading-spinner",
+        "button[aria-label*='停止']",
+        "button[aria-label*='Stop']"
+      ]
     },
     "yuanbao": {
-      "url": "https://yuanbao.tencent.com",
-      "tag": "yuanbao",
-      "engine": "slate_react",
-      "input": "[data-slate-editor]",
-      "fillStrategy": "fiber_editor_insertText_then_paste_fallback",
-      "sendStrategy": "pointer_event_then_enter",
-      "sendButton": "[aria-label*='发送'], [data-testid*='send']",
-      "reply": "[data-testid='message']:last-child, .chat-message:last-child",
-      "loading": "[data-testid*='loading'], .spin",
-      "note": "Slate + Shadow DOM，走 Fiber 反查 editor；与 doubao 完全隔离"
+      "url": "https://yuanbao.tencent.com/",
+      "input": [
+        "[data-slate-editor='true']",
+        "[data-slate-editor]",
+        "[contenteditable='true'][data-slate-node]",
+        "[role='textbox']",
+        "textarea"
+      ],
+      "sendButton": [
+        "button[data-testid*='send']",
+        "button[aria-label*='发送']",
+        "button[aria-label*='Send']",
+        "button[class*='send']",
+        "button[type='submit']"
+      ],
+      "assistantMessage": [
+        "[data-role='assistant']",
+        "[data-testid*='assistant']",
+        ".agent-chat__conv--ai .hyc-content-text",
+        ".agent-chat__conv--ai [class*='markdown']",
+        ".chat-message[class*='assistant']"
+      ],
+      "loading": [
+        "[data-testid*='loading']",
+        "[aria-busy='true']",
+        "[class*='loading']",
+        "button[aria-label*='停止']"
+      ]
+    },
+    "tongyi": {
+      "url": "https://tongyi.aliyun.com/qianwen/",
+      "input": [
+        "textarea",
+        "[contenteditable='true']",
+        "[role='textbox']",
+        ".ProseMirror"
+      ],
+      "sendButton": [
+        "button[aria-label*='发送']",
+        "button[aria-label*='Send']",
+        "button[class*='send']",
+        "button[data-testid*='send']",
+        "button[type='submit']"
+      ],
+      "assistantMessage": [
+        "[data-role='assistant']",
+        "[data-message-author-role='assistant']",
+        ".qwen-markdown",
+        ".tongyi-markdown",
+        "[class*='assistant'] [class*='markdown']"
+      ],
+      "loading": [
+        "[aria-busy='true']",
+        "[class*='loading']",
+        "button[aria-label*='停止']",
+        "button[aria-label*='Stop']"
+      ]
+    },
+    "deepseek": {
+      "url": "https://chat.deepseek.com/",
+      "input": [
+        "textarea",
+        "[contenteditable='true']",
+        "[role='textbox']"
+      ],
+      "sendButton": [
+        "button[aria-label*='发送']",
+        "button[aria-label*='Send']",
+        "button[data-testid*='send']",
+        "button[class*='send']",
+        "button[type='submit']"
+      ],
+      "assistantMessage": [
+        "[data-message-author-role='assistant']",
+        "[data-role='assistant']",
+        ".ds-markdown",
+        "[class*='assistant'] .ds-markdown",
+        "[class*='assistant'] [class*='markdown']"
+      ],
+      "loading": [
+        "[aria-busy='true']",
+        "button[aria-label*='停止']",
+        "button[aria-label*='Stop']",
+        "[class*='loading']"
+      ]
+    },
+    "kimi": {
+      "url": "https://kimi.moonshot.cn/",
+      "input": [
+        "textarea",
+        "[contenteditable='true']",
+        "[role='textbox']",
+        ".ProseMirror"
+      ],
+      "sendButton": [
+        "button[aria-label*='发送']",
+        "button[aria-label*='Send']",
+        "button[data-testid*='send']",
+        "button[class*='send']",
+        "button[type='submit']"
+      ],
+      "assistantMessage": [
+        "[data-role='assistant']",
+        "[data-message-author-role='assistant']",
+        ".segment-assistant [class*='markdown']",
+        ".segment-assistant",
+        "[class*='assistant'] [class*='markdown']"
+      ],
+      "loading": [
+        "[aria-busy='true']",
+        "[class*='loading']",
+        "button[aria-label*='停止']",
+        "button[aria-label*='Stop']"
+      ]
     }
   }
 }

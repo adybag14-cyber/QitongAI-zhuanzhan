@@ -217,7 +217,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
 
             // 浏览器设置
-            SectionTitle("浏览器设置", Icons.Outlined.Smartphone, isDark)
+            SectionTitle(stringResource(R.string.browser_settings), Icons.Outlined.Smartphone, isDark)
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
@@ -228,7 +228,7 @@ fun SettingsScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.TextFields, contentDescription = null, tint = if (isDark) AppleBlueLight else AppleBlue, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("字体缩放", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = if (isDark) AppleLabelDark else AppleLabel)
+                        Text(stringResource(R.string.text_zoom), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = if (isDark) AppleLabelDark else AppleLabel)
                         Spacer(Modifier.weight(1f))
                         Text("${textZoom}%", style = MaterialTheme.typography.bodySmall, color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel)
                     }
@@ -251,7 +251,7 @@ fun SettingsScreen(
                     ConfigField(
                         label = "User-Agent",
                         value = customUa,
-                        placeholder = "默认UA",
+                        placeholder = stringResource(R.string.default_user_agent),
                         onValueChange = {
                             customUa = it
                             GatewayPrefs.setUserAgent(context, it)

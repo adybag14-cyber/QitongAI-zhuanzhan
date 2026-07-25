@@ -4,7 +4,7 @@
     <string name="about_title">About</string>
     <string name="settings_title">Settings</string>
     <string name="settings">Settings</string>
-    <string name="settings_desc">Gateway config, switch control</string>
+    <string name="settings_desc">Gateway and browser configuration</string>
     <string name="language_settings">Language</string>
     <string name="follow_system">Follow System</string>
     <string name="chinese_simple">简体中文</string>
@@ -19,7 +19,7 @@
     <string name="contact_author">Contact Author</string>
     <string name="tech_stack">Tech Stack</string>
     <string name="app_desc">AI web automation tool\nChat with free web AIs like a human, chain multiple platforms</string>
-    <string name="version">v1.0.0</string>
+    <string name="version">v1.0.0-26</string>
     <string name="submit_issue">Submit an Issue or suggestion</string>
     <string name="click_join_qq">Click to join QQ group (ID: 1007488535)</string>
     <string name="copyright">© 2026 QiTong Network</string>
@@ -39,4 +39,63 @@
     <string name="hide">Hide</string>
     <string name="back">Back</string>
     <string name="running_status">Status</string>
+
+    <!-- Browser and bookmark UI -->
+    <string name="bookmarks_title">Bookmark Manager</string>
+    <string name="bookmarks_list">Bookmarks</string>
+    <string name="bookmark_count">%1$d bookmarks</string>
+    <string name="restore_default_bookmarks">Restore Default Bookmarks</string>
+    <string name="restore_default_bookmarks_desc">Reset to the preset AI platform list</string>
+    <string name="restored_default">Defaults restored</string>
+    <string name="qq_group_number_clip_label">QQ group number</string>
+    <string name="qq_group_copied">Group number copied</string>
+    <string name="add_bookmark">Add Bookmark</string>
+    <string name="restore_default">Restore Defaults</string>
+    <string name="no_bookmarks">No bookmarks</string>
+    <string name="bookmarks_total">%1$d bookmarks total</string>
+    <string name="edit">Edit</string>
+    <string name="delete">Delete</string>
+    <string name="edit_bookmark">Edit Bookmark</string>
+    <string name="bookmark_name">Name</string>
+    <string name="website">Website</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="tabs">Tabs</string>
+    <string name="about">About</string>
+    <string name="new_tab">New Tab</string>
+    <string name="bookmarked">Bookmarked</string>
+    <string name="removed_bookmark">Removed: %1$s</string>
+    <string name="default_bookmarks_restored">Default bookmarks restored</string>
+    <string name="close">Close</string>
+    <string name="go">Go</string>
+    <string name="browser_settings">Browser Settings</string>
+    <string name="text_zoom">Text Zoom</string>
+    <string name="default_user_agent">Default user agent</string>
+    <string name="ai_injection">AI Injection</string>
+    <string name="message_hint">Enter a message to send?</string>
+    <string name="extract_chat">Extract Chat</string>
+    <string name="diagnose_page">Diagnose Page</string>
+    <string name="send">Send</string>
+    <string name="extract_result">Extraction Result</string>
+    <string name="no_data">No data</string>
+    <string name="bookmarks">Bookmarks</string>
+    <string name="bookmark_current">Bookmark Current Page</string>
+
+    <!-- Multi-AI pipeline -->
+    <string name="pipeline_title">Multi-AI Pipeline</string>
+    <string name="pipeline_description">Pass each platform\'s complete reply to the next platform in order. Sign in to every selected service before running.</string>
+    <string name="pipeline_initial_prompt">Initial prompt</string>
+    <string name="pipeline_prompt_hint">Enter the message for the first AI</string>
+    <string name="pipeline_platform_order">Platform order</string>
+    <string name="pipeline_platform_order_hint">Select platforms and arrange the execution order.</string>
+    <string name="pipeline_start">Start Pipeline</string>
+    <string name="pipeline_cancel">Cancel Pipeline</string>
+    <string name="pipeline_ready">Ready</string>
+    <string name="pipeline_running">Pipeline running</string>
+    <string name="pipeline_completed">Pipeline completed</string>
+    <string name="pipeline_failed">Pipeline failed</string>
+    <string name="pipeline_cancelled">Pipeline cancelled</string>
+    <string name="pipeline_final_output">Final output</string>
+    <string name="pipeline_move_up">Move up</string>
+    <string name="pipeline_move_down">Move down</string>
 </resources>

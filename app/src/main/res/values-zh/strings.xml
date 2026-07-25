@@ -19,7 +19,7 @@
     <string name="contact_author">联系作者</string>
     <string name="tech_stack">技术栈</string>
     <string name="app_desc">多AI网页自动化对话工具\n像真人一样操作免费网页AI，自动串联多平台对话</string>
-    <string name="version">v1.0.0</string>
+    <string name="version">v1.0.0-26</string>
     <string name="submit_issue">提交 Issue 或建议</string>
     <string name="click_join_qq">点击加入 QQ 交流群（群号: 1007488535）</string>
     <string name="copyright">© 2026 綦桐网络</string>
@@ -39,4 +39,63 @@
     <string name="hide">隐藏</string>
     <string name="back">返回</string>
     <string name="running_status">运行状态</string>
+
+    <!-- Browser and bookmark UI -->
+    <string name="bookmarks_title">收藏管理</string>
+    <string name="bookmarks_list">收藏列表</string>
+    <string name="bookmark_count">%1$d 个收藏</string>
+    <string name="restore_default_bookmarks">恢复默认收藏</string>
+    <string name="restore_default_bookmarks_desc">重置为预设 AI 平台列表</string>
+    <string name="restored_default">已恢复默认</string>
+    <string name="qq_group_number_clip_label">QQ 群号</string>
+    <string name="qq_group_copied">群号已复制</string>
+    <string name="add_bookmark">添加收藏</string>
+    <string name="restore_default">恢复默认</string>
+    <string name="no_bookmarks">暂无收藏</string>
+    <string name="bookmarks_total">共 %1$d 个收藏</string>
+    <string name="edit">编辑</string>
+    <string name="delete">删除</string>
+    <string name="edit_bookmark">编辑收藏</string>
+    <string name="bookmark_name">名称</string>
+    <string name="website">网址</string>
+    <string name="save">保存</string>
+    <string name="cancel">取消</string>
+    <string name="tabs">标签页</string>
+    <string name="about">关于</string>
+    <string name="new_tab">新标签页</string>
+    <string name="bookmarked">已收藏</string>
+    <string name="removed_bookmark">已移除：%1$s</string>
+    <string name="default_bookmarks_restored">已恢复默认收藏</string>
+    <string name="close">关闭</string>
+    <string name="go">前往</string>
+    <string name="browser_settings">浏览器设置</string>
+    <string name="text_zoom">字体缩放</string>
+    <string name="default_user_agent">默认 UA</string>
+    <string name="ai_injection">AI 注入</string>
+    <string name="message_hint">输入要发送的消息…</string>
+    <string name="extract_chat">提取对话</string>
+    <string name="diagnose_page">诊断页面</string>
+    <string name="send">发送</string>
+    <string name="extract_result">提取结果</string>
+    <string name="no_data">无数据</string>
+    <string name="bookmarks">收藏夹</string>
+    <string name="bookmark_current">收藏当前页面</string>
+
+    <!-- Multi-AI pipeline -->
+    <string name="pipeline_title">多AI流水线</string>
+    <string name="pipeline_description">按顺序把每个平台的完整回复传给下一个平台。运行前请先在所选平台登录。</string>
+    <string name="pipeline_initial_prompt">初始提示词</string>
+    <string name="pipeline_prompt_hint">输入发送给第一个AI的内容</string>
+    <string name="pipeline_platform_order">平台顺序</string>
+    <string name="pipeline_platform_order_hint">勾选平台并调整执行顺序。</string>
+    <string name="pipeline_start">开始流水线</string>
+    <string name="pipeline_cancel">取消流水线</string>
+    <string name="pipeline_ready">准备就绪</string>
+    <string name="pipeline_running">流水线运行中</string>
+    <string name="pipeline_completed">流水线已完成</string>
+    <string name="pipeline_failed">流水线失败</string>
+    <string name="pipeline_cancelled">流水线已取消</string>
+    <string name="pipeline_final_output">最终输出</string>
+    <string name="pipeline_move_up">上移</string>
+    <string name="pipeline_move_down">下移</string>
 </resources>
