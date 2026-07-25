@@ -21,17 +21,20 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
 
-      - name: Resolve native runner and Android SDK
+      - name: Resolve or install Android SDK on ARM64
         shell: bash
+        env:
+          CMDLINE_TOOLS_URL: https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip
+          CMDLINE_TOOLS_SHA256: 4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583
         run: |
           set -euxo pipefail
           uname -a
@@ -64,10 +67,27 @@ jobs:
           fi
 
           if [ -z "$SDK_ROOT" ]; then
-            echo "No Android SDK containing platforms/android-35 was found." >&2
-            echo "Candidate Android-related directories:" >&2
-            find /usr/local /opt "$HOME" -maxdepth 5 -type d \( -iname '*android*' -o -iname '*sdk*' \) -print 2>/dev/null | head -n 200 >&2 || true
-            exit 1
+            SDK_ROOT="$RUNNER_TEMP/android-sdk"
+            TOOLS_ZIP="$RUNNER_TEMP/android-command-line-tools.zip"
+            EXTRACT_ROOT="$RUNNER_TEMP/android-command-line-tools"
+            rm -rf "$SDK_ROOT" "$EXTRACT_ROOT"
+            mkdir -p "$SDK_ROOT/cmdline-tools" "$EXTRACT_ROOT"
+
+            curl --fail --location --retry 3 --output "$TOOLS_ZIP" "$CMDLINE_TOOLS_URL"
+            echo "$CMDLINE_TOOLS_SHA256  $TOOLS_ZIP" | sha256sum --check --strict
+            unzip -q "$TOOLS_ZIP" -d "$EXTRACT_ROOT"
+            mv "$EXTRACT_ROOT/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+            test -x "$SDKMANAGER"
+            set +o pipefail
+            yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null
+            LICENSE_EXIT=${PIPESTATUS[1]}
+            set -o pipefail
+            test "$LICENSE_EXIT" -eq 0
+            "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
+              "platforms;android-35" \
+              "build-tools;35.0.0"
           fi
 
           test -d "$SDK_ROOT/platforms/android-35"
