@@ -11,8 +11,8 @@ android {
         applicationId = "com.qtwl.YitongAIzhuanzhan"
         minSdk = 24
         targetSdk = 35
-        versionCode = 29
-        versionName = "1.0.1-1"
+        versionCode = 31
+        versionName = "1.0.1-3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -62,7 +62,6 @@ if (isLinuxArm64) {
 }
 
 dependencies {
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -72,6 +71,8 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
+    implementation("androidx.core:core-ktx:1.10.1")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

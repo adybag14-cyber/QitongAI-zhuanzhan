@@ -214,53 +214,58 @@
     return JSON.stringify({ ok: false, reason: 'NO_SEND_BUTTON' });
   };
 
-  // ===== 回复监听 =====
+  // ===== 回复监听（贪婪匹配） =====
   window.__watchReply = function () {
     if (window.__replyWatcher) return;
     window.__replyWatcher = true;
 
-    let lastText = '';
-    let stableCount = 0;
-    let loadingGone = false;
+    var lastText = '';
+    var stableCount = 0;
+    var lastChangeTime = Date.now();
 
-    const checkDone = () => {
-      const loading = document.querySelector(
-        '[data-testid*="loading" i], .spin, .loading, [aria-busy="true"], [data-loading="true"]'
-      );
-      loadingGone = !loading;
-
-      const messages = document.querySelectorAll(
-        '[data-testid*="message" i], .chat-message, .message-item'
-      );
-      let lastAi = '';
-      messages.forEach(m => {
-        const cls = (m.className || '') + ' ' + (m.getAttribute('data-role') || '');
-        if (/assistant|ai|bot|reply/i.test(cls)) {
-          lastAi = m.textContent || '';
-        }
-      });
-
-      if (lastAi && loadingGone) {
-        if (lastAi === lastText) {
-          stableCount++;
-          if (stableCount >= 3) {
-            if (window.Android && window.Android.onReply) {
-              window.Android.onReply(lastAi.trim());
-            }
-            window.__replyWatcher = false;
-          }
-        } else {
-          lastText = lastAi;
-          stableCount = 0;
-        }
+    function getAllText() {
+      var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      var texts = [];
+      var node;
+      while (node = walker.nextNode()) {
+        var p = node.parentElement;
+        if (!p) continue;
+        var s = window.getComputedStyle(p);
+        if (s.display === 'none' || s.visibility === 'hidden') continue;
+        var t = node.textContent.trim();
+        if (t.length > 20) texts.push(t);
       }
-    };
+      return texts.sort(function(a,b){ return b.length - a.length; }).slice(0,5);
+    }
 
-    const mo = new MutationObserver(() => {
-      clearTimeout(window.__replyTimer);
-      window.__replyTimer = setTimeout(checkDone, 800);
+    function checkReply() {
+      var texts = getAllText();
+      if (texts.length === 0) return;
+      var longest = texts[0];
+      if (longest === lastText) {
+        stableCount++;
+      } else {
+        lastText = longest;
+        stableCount = 0;
+        lastChangeTime = Date.now();
+      }
+      var elapsed = Date.now() - lastChangeTime;
+      if (stableCount >= 3 && longest.length > 30 && elapsed > 2000) {
+        try {
+          if (window.Android && window.Android.onReply) {
+            window.Android.onReply(longest);
+          }
+        } catch(e) {}
+        window.__replyWatcher = false;
+      }
+    }
+
+    setInterval(checkReply, 800);
+    var mo = new MutationObserver(function(){
+      lastChangeTime = Date.now();
+      stableCount = 0;
     });
-    mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+    mo.observe(document.body, {childList:true, subtree:true, characterData:true});
   };
 
   console.log('[SlateFiller] ready');

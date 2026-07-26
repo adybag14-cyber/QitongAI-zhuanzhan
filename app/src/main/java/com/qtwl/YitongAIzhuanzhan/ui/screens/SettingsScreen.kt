@@ -1,7 +1,11 @@
 package com.qtwl.YitongAIzhuanzhan.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -23,6 +28,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.qtwl.YitongAIzhuanzhan.GatewayPrefs
+import com.qtwl.YitongAIzhuanzhan.GatewayService
+import com.qtwl.YitongAIzhuanzhan.IpHelper
 import com.qtwl.YitongAIzhuanzhan.R
 import com.qtwl.YitongAIzhuanzhan.ui.components.GlassCard
 import com.qtwl.YitongAIzhuanzhan.ui.theme.*
@@ -37,7 +45,6 @@ fun SettingsScreen(
     val scrollState = rememberScrollState()
 
     var gatewayEnabled by remember { mutableStateOf(GatewayPrefs.isEnabled(context)) }
-    var gatewayHost by remember { mutableStateOf(GatewayPrefs.getHost(context)) }
     var gatewayPort by remember { mutableStateOf(GatewayPrefs.getPort(context)) }
     var gatewayApiKey by remember { mutableStateOf(GatewayPrefs.getApiKey(context)) }
     var showApiKey by remember { mutableStateOf(false) }
@@ -109,6 +116,15 @@ fun SettingsScreen(
                         onCheckedChange = {
                             gatewayEnabled = it
                             GatewayPrefs.setEnabled(context, it)
+                            if (it) {
+                                try {
+                                    GatewayService.start(context)
+                                } catch (e: Exception) {
+                                    // 通知权限未授权时失败
+                                }
+                            } else {
+                                GatewayService.stop(context)
+                            }
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
@@ -130,24 +146,69 @@ fun SettingsScreen(
                 elevation = 2.dp
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    ConfigField(
-                        label = stringResource(R.string.gateway_host),
-                        value = gatewayHost,
-                        placeholder = "127.0.0.1",
-                        onValueChange = {
-                            gatewayHost = it
-                            GatewayPrefs.setHost(context, it)
-                        },
-                        isDark = isDark,
-                        icon = Icons.Outlined.Dns
+                    // 使用说明
+                    Text(
+                        "使用说明：在 Cherry Studio 等客户端里添加 OpenAI 兼容接口，地址填下方 IP:端口，API Key 填下方密钥即可。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel,
+                        modifier = Modifier.padding(bottom = 12.dp)
                     )
+
+                    // 主机地址（只读，可复制）
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Dns,
+                            contentDescription = null,
+                            tint = if (isDark) AppleBlueLight else AppleBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(R.string.gateway_host),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isDark) AppleLabelDark else AppleLabel
+                        )
+                    }
+                    val ips = IpHelper.getAllIps()
+                    val ipText = if (ips.isNotEmpty()) ips.joinToString(", ") { "$it:7773" } else "未连接网络"
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark)
+                            .clickable {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("网关地址", ipText))
+                                Toast.makeText(context, "已复制地址", Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = ipText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isDark) AppleLabelDark else AppleLabel,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(
+                            imageVector = Icons.Outlined.ContentCopy,
+                            contentDescription = "复制",
+                            tint = if (isDark) AppleBlueLight else AppleBlue,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
 
                     Spacer(Modifier.height(12.dp))
 
+                    // 端口（可编辑）
                     ConfigField(
                         label = stringResource(R.string.gateway_port),
                         value = gatewayPort,
-                        placeholder = "8080",
+                        placeholder = "7773",
                         onValueChange = {
                             gatewayPort = it
                             GatewayPrefs.setPort(context, it)
@@ -159,7 +220,7 @@ fun SettingsScreen(
 
                     Spacer(Modifier.height(12.dp))
 
-                    // API Key
+                    // API Key（可编辑）
                     Row(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -280,12 +341,6 @@ fun SettingsScreen(
                     )
                     Spacer(Modifier.height(8.dp))
                     StatusRow(
-                        label = stringResource(R.string.gateway_address),
-                        value = "http://${gatewayHost}:${gatewayPort}",
-                        isDark = isDark
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    StatusRow(
                         label = stringResource(R.string.gateway_api_key),
                         value = if (gatewayApiKey.isNotEmpty()) "${gatewayApiKey.take(8)}..." else stringResource(R.string.not_set),
                         isDark = isDark
@@ -394,43 +449,4 @@ private fun StatusRow(
             color = valueColor ?: (if (isDark) AppleLabelDark else AppleLabel)
         )
     }
-}
-
-object GatewayPrefs {
-    private const val PREFS_NAME = "gateway_prefs"
-    private const val KEY_ENABLED = "gateway_enabled"
-    private const val KEY_HOST = "gateway_host"
-    private const val KEY_PORT = "gateway_port"
-    private const val KEY_API_KEY = "gateway_api_key"
-    private const val KEY_UA = "custom_ua"
-    private const val KEY_TEXT_ZOOM = "text_zoom"
-
-    private fun prefs(context: Context) =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-    fun isEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, false)
-    fun setEnabled(context: Context, enabled: Boolean) =
-        prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
-
-    fun getHost(context: Context): String = prefs(context).getString(KEY_HOST, "127.0.0.1") ?: "127.0.0.1"
-    fun setHost(context: Context, host: String) =
-        prefs(context).edit().putString(KEY_HOST, host).apply()
-
-    fun getPort(context: Context): String = prefs(context).getString(KEY_PORT, "8080") ?: "8080"
-    fun setPort(context: Context, port: String) =
-        prefs(context).edit().putString(KEY_PORT, port).apply()
-
-    fun getApiKey(context: Context): String = prefs(context).getString(KEY_API_KEY, "") ?: ""
-    fun setApiKey(context: Context, apiKey: String) =
-        prefs(context).edit().putString(KEY_API_KEY, apiKey).apply()
-
-    fun getUserAgent(context: Context): String = prefs(context).getString(KEY_UA,
-        "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36"
-    ) ?: "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36"
-    fun setUserAgent(context: Context, ua: String) =
-        prefs(context).edit().putString(KEY_UA, ua).apply()
-
-    fun getTextZoom(context: Context): Int = prefs(context).getInt(KEY_TEXT_ZOOM, 100)
-    fun setTextZoom(context: Context, zoom: Int) =
-        prefs(context).edit().putInt(KEY_TEXT_ZOOM, zoom).apply()
 }

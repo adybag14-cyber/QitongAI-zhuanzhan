@@ -8,6 +8,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -29,11 +30,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.qtwl.YitongAIzhuanzhan.AppHider
 import com.qtwl.YitongAIzhuanzhan.BookmarkManager
+import com.qtwl.YitongAIzhuanzhan.GatewayPrefs
+import com.qtwl.YitongAIzhuanzhan.GatewayService
+import com.qtwl.YitongAIzhuanzhan.IpHelper
 import com.qtwl.YitongAIzhuanzhan.LocaleManager
 import com.qtwl.YitongAIzhuanzhan.R
 import com.qtwl.YitongAIzhuanzhan.ui.components.GlassCard
 import com.qtwl.YitongAIzhuanzhan.ui.theme.*
+import androidx.compose.material3.ripple
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,14 +97,43 @@ fun AboutScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            // 设置
+            // 网关设置
+            SectionTitle("网关设置", Icons.Outlined.PowerSettingsNew, isDark)
             GlassCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), elevation = 2.dp) {
-                LinkItem(Icons.Outlined.Settings, stringResource(R.string.settings), stringResource(R.string.settings_desc), onNavigateToSettings, isDark)
+                LinkItem(Icons.Outlined.Settings, "网关配置", "端口、API Key、后台保活", onNavigateToSettings, isDark)
             }
 
             Spacer(Modifier.height(20.dp))
 
-            // 收藏管理 - 可点击
+            // 隐私保护
+            SectionTitle("隐私保护", Icons.Outlined.Security, isDark)
+            GlassCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), elevation = 2.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Outlined.Security, contentDescription = null, tint = if (isDark) AppleBlueLight else AppleBlue, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("任务视图隐藏", style = MaterialTheme.typography.bodyLarge, color = if (isDark) AppleLabelDark else AppleLabel)
+                        Text("AI 任务运行时隐藏在最近任务", style = MaterialTheme.typography.bodySmall, color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel)
+                    }
+                    Switch(
+                        checked = AppHider.isEnabled(context),
+                        onCheckedChange = { AppHider.setEnabled(context, it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = AppleBlue,
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = if (isDark) AppleGray.copy(alpha = 0.4f) else AppleGray2.copy(alpha = 0.5f)
+                        )
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // 设置
             SectionTitle(stringResource(R.string.bookmarks_title), Icons.Outlined.Bookmarks, isDark)
             GlassCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), elevation = 2.dp) {
                 Column {
@@ -179,7 +214,7 @@ private fun LanguageSettings(isDark: Boolean, currentLang: Int, onLanguageSelect
     GlassCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), elevation = 2.dp) {
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
             languages.forEachIndexed { index, lang ->
-                Row(modifier = Modifier.fillMaxWidth().clickable { selectedLang = index; onLanguageSelected(index) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = ripple(bounded = false, radius = 24.dp)) { selectedLang = index; onLanguageSelected(index) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = selectedLang == index, onClick = { selectedLang = index; onLanguageSelected(index) }, colors = RadioButtonDefaults.colors(selectedColor = AppleBlue, unselectedColor = if (isDark) AppleGray else AppleGray2))
                     Spacer(Modifier.width(8.dp))
                     Text(lang, style = MaterialTheme.typography.bodyMedium, color = if (isDark) AppleLabelDark else AppleLabel)
@@ -192,7 +227,14 @@ private fun LanguageSettings(isDark: Boolean, currentLang: Int, onLanguageSelect
 
 @Composable
 private fun LinkItem(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit, isDark: Boolean) {
-    Row(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(interactionSource = interactionSource, indication = ripple(bounded = false, radius = 24.dp), onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Icon(icon, contentDescription = null, tint = if (isDark) AppleBlueLight else AppleBlue, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {

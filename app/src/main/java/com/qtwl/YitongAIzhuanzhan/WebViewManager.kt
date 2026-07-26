@@ -7,12 +7,13 @@ import android.os.Handler
 import android.os.Looper
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import com.qtwl.YitongAIzhuanzhan.ui.screens.GatewayPrefs
+import com.qtwl.YitongAIzhuanzhan.GatewayPrefs
 import java.util.concurrent.CopyOnWriteArraySet
 
 // Desktop UA prevents several AI sites from forcing reduced mobile pages.
@@ -96,7 +97,7 @@ object WebViewManager {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    fun initWebView(context: Context, tabId: Int): WebView? {
+    fun initWebView(context: Context, tabId: Int, onReply: (String) -> Unit = {}): WebView? {
         val tab = tabs.find { it.id == tabId } ?: return null
         tab.webView?.let { return it }
 
@@ -106,6 +107,25 @@ object WebViewManager {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
+
+            // ✅ Android JS 桥 — 每个 WebView 创建时注册
+            addJavascriptInterface(object {
+                @JavascriptInterface
+                fun onReply(content: String) {
+                    Handler(Looper.getMainLooper()).post {
+                        onReply(content)
+                        // 同时更新通知栏
+                        NotificationHelper.showReply(appContext, tabId.toString(), content)
+                    }
+                }
+                @JavascriptInterface
+                fun onStatus(msg: String) {
+                    Handler(Looper.getMainLooper()).post {
+                        NotificationHelper.update(appContext, "綦桐AI转站", msg)
+                    }
+                }
+            }, "Android")
+
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.loadWithOverviewMode = true

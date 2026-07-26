@@ -480,6 +480,7 @@ object JsInjector {
       var nodes=rs[r].querySelectorAll(loadingSelectors[s]);
       for(var n=0;n<nodes.length;n++) if(usable(nodes[n])) isLoading=true;
     }
+    // Try fixed selectors first
     for(var s=0;s<replySelectors.length;s++) for(var r=0;r<rs.length;r++){
       var nodes=rs[r].querySelectorAll(replySelectors[s]);
       for(var n=0;n<nodes.length;n++){
@@ -490,9 +491,8 @@ object JsInjector {
         if(text && !seen.has(text)){ seen.add(text); messages.push(text); }
       }
     }
-    var greedy=false;
+    // Greedy fallback: TreeWalker all text nodes
     if(messages.length === 0){
-      greedy=true;
       var walker=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       var candidates=[];
       var node;
@@ -502,20 +502,19 @@ object JsInjector {
         var st=getComputedStyle(p);
         if(st.display==='none'||st.visibility==='hidden') continue;
         var t=node.textContent.trim();
-        if(t.length>100&&!/登录|注册|隐私|条款|协议|Copyright|All rights|首页|关于|联系/.test(t)){
-          candidates.push(t);
-        }
+        if(t.length>30) candidates.push(t);
       }
       candidates.sort(function(a,b){return b.length-a.length;});
-      if(candidates.length>0&&!seen.has(candidates[0])){seen.add(candidates[0]);messages.push(candidates[0]);}
+      for(var i=0;i<Math.min(5,candidates.length);i++){
+        if(!seen.has(candidates[i])){ seen.add(candidates[i]); messages.push(candidates[i]); }
+      }
     }
     var body=(document.body && document.body.innerText || '').toLowerCase();
     return JSON.stringify({
-      text: messages.length ? (greedy ? messages[0] : messages[messages.length-1]) : '',
+      text: messages.length ? messages[messages.length-1] : '',
       count: messages.length,
       loading: isLoading,
       inputFound: inputFound,
-      greedy: greedy,
       loginLikely: /登录|登錄|sign in|log in|扫码|掃碼|verify your account/.test(body),
       url: location.href
     });

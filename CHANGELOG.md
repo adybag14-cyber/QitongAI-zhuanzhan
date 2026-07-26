@@ -1,5 +1,21 @@
 # 📋 更新日志
 
+## v1.0.1-2 (2026-07-26) — 测试版 🔧
+
+### ✨ 新增
+- 🌐 **OpenAI 兼容网关** — `GatewayServer.kt`（NanoHTTPD :8080）+ `GatewayService.kt`（前台服务保活）
+- 🔔 **通知栏动态更新** — `NotificationHelper.kt`，网关状态实时显示
+- 👀 **运行时任务视图隐藏** — `AppHider.kt`，AI 任务时从最近任务列表隐藏
+- 📡 **开机自启** — `BootReceiver.kt`，网关开机自动启动
+- ⚙️ **GatewayPrefs** — 网关配置持久化（已合并到 SettingsScreen.kt）
+
+### 🐛 修复
+- ✅ **Android JS 桥注册** — `WebViewManager.initWebView()` 里每个 WebView 创建时注册
+- ✅ **AppHider API 兼容性** — 使用 `ActivityManager.AppTask.setExcludeFromRecents()`
+- ✅ **GatewayPrefs 重复声明冲突** — 删除独立文件，使用 SettingsScreen.kt 中已有的
+
+---
+
 ## v1.0.0 (2026-07-26) — 正式版 🎉
 
 ### ✨ 新增（来自 adybag14-cyber 工程师 PR #1）
