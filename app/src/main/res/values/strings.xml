@@ -32,6 +32,8 @@
     <string name="gateway_status">网关状态</string>
     <string name="gateway_running">运行中</string>
     <string name="gateway_stopped">已停止</string>
+    <string name="gateway_starting">正在启动</string>
+    <string name="gateway_start_failed">启动失败</string>
     <string name="gateway_address">地址</string>
     <string name="not_set">未设置</string>
     <string name="show">显示</string>

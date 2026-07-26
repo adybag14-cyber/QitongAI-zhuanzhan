@@ -535,19 +535,27 @@ private fun BottomNavigationBar(
 @Composable
 private fun NavButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    enabled: Boolean, onClick: () -> Unit, isDark: Boolean, isHighlight: Boolean = false
+    enabled: Boolean,
+    onClick: () -> Unit,
+    isDark: Boolean,
+    isHighlight: Boolean = false
 ) {
-    val bgColor = when {
-        isHighlight -> if (isDark) AppleBlue.copy(alpha = 0.15f) else AppleBlue.copy(alpha = 0.1f)
-        else -> Color.Transparent
-    }
     val iconColor = when {
         !enabled -> if (isDark) AppleGray.copy(alpha = 0.3f) else AppleGray2.copy(alpha = 0.3f)
-        isHighlight -> AppleBlue
+        isHighlight -> if (isDark) AppleBlueLight else AppleBlue
         else -> if (isDark) AppleLabelDark else AppleLabel
     }
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(42.dp).clip(CircleShape).background(bgColor)) {
-        Icon(imageVector = icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(22.dp))
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(42.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = iconColor,
+            modifier = Modifier.size(22.dp)
+        )
     }
 }
 

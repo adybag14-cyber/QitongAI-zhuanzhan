@@ -5,6 +5,7 @@ import android.os.Looper
 import android.webkit.WebView
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Result of one complete web-AI interaction: ready -> fill -> send -> stable reply. */
@@ -15,11 +16,13 @@ data class WebAutomationResult(
     val response: String = ""
 )
 
-class AutomationHandle internal constructor() {
+class AutomationHandle internal constructor(
+    private val onCancel: () -> Unit = {}
+) {
     private val cancelled = AtomicBoolean(false)
 
     fun cancel() {
-        cancelled.set(true)
+        if (cancelled.compareAndSet(false, true)) onCancel()
     }
 
     internal fun isCancelled(): Boolean = cancelled.get()
@@ -46,6 +49,10 @@ object JsInjector {
     private const val READY_TIMEOUT_MS = 45_000L
     private const val POLL_INTERVAL_MS = 900L
     private const val REQUIRED_STABLE_POLLS = 3
+    private const val REQUIRED_STABLE_POLLS_WHILE_LOADING = 10
+
+    @Volatile
+    private var slateFillerSource: String? = null
 
     fun sendAndAwaitReply(
         platformId: String,
@@ -55,13 +62,19 @@ object JsInjector {
         callback: (WebAutomationResult) -> Unit
     ): AutomationHandle {
         val platform = AiPlatformRegistry.get(platformId) ?: AiPlatformRegistry.generic()
-        val handle = AutomationHandle()
+        val requestId = UUID.randomUUID().toString()
+        val handle = AutomationHandle {
+            ReplyBridge.unregister(requestId)
+            cancelReplyWatcher(webView, requestId)
+        }
         val finished = AtomicBoolean(false)
         val deadline = System.currentTimeMillis() + timeoutMs
 
         fun finish(result: WebAutomationResult) {
-            if (!handle.isCancelled() && finished.compareAndSet(false, true)) {
-                callback(result)
+            if (finished.compareAndSet(false, true)) {
+                ReplyBridge.unregister(requestId)
+                cancelReplyWatcher(webView, requestId)
+                if (!handle.isCancelled()) callback(result)
             }
         }
 
@@ -94,6 +107,29 @@ object JsInjector {
                         )
                         return@captureSnapshot
                     }
+
+                    ReplyBridge.register(requestId) { content ->
+                        val reply = content.trim()
+                        if (reply.isNotBlank() && reply != message.trim()) {
+                            finish(
+                                WebAutomationResult(
+                                    success = true,
+                                    stage = "complete",
+                                    detail = "Reply captured from ${platform.displayName} through the JavaScript bridge",
+                                    response = reply
+                                )
+                            )
+                        }
+                    }
+                    armReplyWatcher(
+                        platform = platform,
+                        webView = webView,
+                        handle = handle,
+                        requestId = requestId,
+                        baseline = baseline,
+                        sentMessage = message,
+                        timeoutMs = timeoutMs
+                    )
 
                     evaluateJson(webView, buildFillScript(platform, message), handle) { fill ->
                         if (fill?.optBoolean("success", false) != true) {
@@ -228,7 +264,12 @@ object JsInjector {
                 (snapshot.count > baseline.count || normalisedReply != baseline.text.trim())
             val nextStable = if (hasNewReply && snapshot.text == lastText) stablePolls + 1 else 0
 
-            if (hasNewReply && !snapshot.loading && nextStable >= REQUIRED_STABLE_POLLS) {
+            val requiredStablePolls = if (snapshot.loading) {
+                REQUIRED_STABLE_POLLS_WHILE_LOADING
+            } else {
+                REQUIRED_STABLE_POLLS
+            }
+            if (hasNewReply && nextStable >= requiredStablePolls) {
                 callback(
                     WebAutomationResult(
                         success = true,
@@ -291,6 +332,51 @@ object JsInjector {
                     )
                 }
             )
+        }
+    }
+
+    private fun armReplyWatcher(
+        platform: AiPlatformDefinition,
+        webView: WebView,
+        handle: AutomationHandle,
+        requestId: String,
+        baseline: ReplySnapshot,
+        sentMessage: String,
+        timeoutMs: Long
+    ) {
+        if (handle.isCancelled()) return
+        val source = loadSlateFiller(webView) ?: return
+        val options = JSONObject().apply {
+            put("requestId", requestId)
+            put("replySelectors", JSONArray(platform.assistantMessageSelectors))
+            put("loadingSelectors", JSONArray(platform.loadingSelectors))
+            put("baselineCount", baseline.count)
+            put("baselineText", baseline.text)
+            put("sentMessage", sentMessage)
+            put("timeoutMs", timeoutMs)
+        }
+        webView.evaluateJavascript(source) {
+            if (handle.isCancelled()) return@evaluateJavascript
+            val script = "(function(){return window.__watchReply ? window.__watchReply(${options}) : false;})()"
+            webView.evaluateJavascript(script, null)
+        }
+    }
+
+    private fun loadSlateFiller(webView: WebView): String? {
+        slateFillerSource?.let { return it }
+        return synchronized(this) {
+            slateFillerSource ?: runCatching {
+                webView.context.assets.open("SlateFiller.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+            }.getOrNull()?.also { slateFillerSource = it }
+        }
+    }
+
+    private fun cancelReplyWatcher(webView: WebView, requestId: String) {
+        val script = "(function(){if(window.__cancelReplyWatcher){window.__cancelReplyWatcher(${JSONObject.quote(requestId)});}})()"
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            runCatching { webView.evaluateJavascript(script, null) }
+        } else {
+            mainHandler.post { runCatching { webView.evaluateJavascript(script, null) } }
         }
     }
 
@@ -459,6 +545,14 @@ object JsInjector {
 (function(){
   try{
     var inputSelectors=$inputs, replySelectors=$replies, loadingSelectors=$loading;
+    var fallbackSelectors=[
+      '[data-role="assistant"]',
+      '[data-message-author-role="assistant"]',
+      '[data-testid*="assistant"]',
+      '[class*="assistant-message"]',
+      '[class*="message-assistant"]',
+      '.ds-markdown', '.qwen-markdown', '.markdown-body', '.prose'
+    ];
     function roots(){
       var result=[document], queue=[document];
       while(queue.length){
@@ -467,56 +561,62 @@ object JsInjector {
       }
       return result;
     }
-    function usable(el){
+    function visible(el){
       if(!el) return false;
-      var style=getComputedStyle(el);
-      return !el.hidden && style.display!=='none' && style.visibility!=='hidden';
+      var style=getComputedStyle(el), rect=el.getBoundingClientRect();
+      return !el.hidden && style.display!=='none' && style.visibility!=='hidden' && rect.width>0 && rect.height>0;
     }
-    var rs=roots(), messages=[], seen=new Set(), inputFound=false, isLoading=false;
-    for(var s=0;s<inputSelectors.length;s++) for(var r=0;r<rs.length;r++){
-      var input=rs[r].querySelector(inputSelectors[s]); if(usable(input)) inputFound=true;
+    function isUserMessage(el){
+      return !!(el.closest && el.closest(
+        '[data-role="user"],[data-message-author-role="user"],[data-testid*="user"],'+
+        '[class*="user-message"],[class*="message-user"],[class*="human-message"]'
+      ));
     }
-    for(var s=0;s<loadingSelectors.length;s++) for(var r=0;r<rs.length;r++){
-      var nodes=rs[r].querySelectorAll(loadingSelectors[s]);
-      for(var n=0;n<nodes.length;n++) if(usable(nodes[n])) isLoading=true;
-    }
-    for(var s=0;s<replySelectors.length;s++) for(var r=0;r<rs.length;r++){
-      var nodes=rs[r].querySelectorAll(replySelectors[s]);
-      for(var n=0;n<nodes.length;n++){
-        var el=nodes[n]; if(!usable(el)) continue;
-        if(el.tagName==='TEXTAREA' || el.tagName==='INPUT' || el.isContentEditable) continue;
-        if(el.closest && el.closest("[data-role='user'],[data-message-author-role='user'],[data-testid*='user'],[class*='user-message'],[class*='message-user']")) continue;
-        var text=(el.innerText || el.textContent || '').replace(/\\u00a0/g,' ').trim();
-        if(text && !seen.has(text)){ seen.add(text); messages.push(text); }
-      }
-    }
-    var greedy=false;
-    if(messages.length === 0){
-      greedy=true;
-      var walker=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      var candidates=[];
-      var node;
-      while(node=walker.nextNode()){
-        var p=node.parentElement;
-        if(!p) continue;
-        var st=getComputedStyle(p);
-        if(st.display==='none'||st.visibility==='hidden') continue;
-        var t=node.textContent.trim();
-        if(t.length>100&&!/登录|注册|隐私|条款|协议|Copyright|All rights|首页|关于|联系/.test(t)){
-          candidates.push(t);
+    function collectElements(selectors){
+      var rs=roots(), elements=[], seen=new Set();
+      for(var s=0;s<selectors.length;s++) for(var r=0;r<rs.length;r++){
+        var nodes=[];
+        try{ nodes=rs[r].querySelectorAll(selectors[s]); }catch(ignore){}
+        for(var n=0;n<nodes.length;n++){
+          var el=nodes[n];
+          if(!seen.has(el) && visible(el) && !isUserMessage(el) &&
+             el.tagName!=='TEXTAREA' && el.tagName!=='INPUT' && !el.isContentEditable){
+            seen.add(el); elements.push(el);
+          }
         }
       }
-      candidates.sort(function(a,b){return b.length-a.length;});
-      if(candidates.length>0&&!seen.has(candidates[0])){seen.add(candidates[0]);messages.push(candidates[0]);}
+      elements.sort(function(a,b){
+        if(a===b) return 0;
+        var relation=a.compareDocumentPosition ? a.compareDocumentPosition(b) : 0;
+        if(relation & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if(relation & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        return a.getBoundingClientRect().top-b.getBoundingClientRect().top;
+      });
+      return elements;
+    }
+    var rs=roots(), inputFound=false, isLoading=false;
+    for(var s=0;s<inputSelectors.length;s++) for(var r=0;r<rs.length;r++){
+      var input=null; try{ input=rs[r].querySelector(inputSelectors[s]); }catch(ignore){}
+      if(visible(input)) inputFound=true;
+    }
+    for(var s=0;s<loadingSelectors.length;s++) for(var r=0;r<rs.length;r++){
+      var nodes=[]; try{ nodes=rs[r].querySelectorAll(loadingSelectors[s]); }catch(ignore){}
+      for(var n=0;n<nodes.length;n++) if(visible(nodes[n])) isLoading=true;
+    }
+    var elements=collectElements(replySelectors);
+    if(elements.length===0) elements=collectElements(fallbackSelectors);
+    var messages=[], seenText=new Set();
+    for(var i=0;i<elements.length;i++){
+      var text=(elements[i].innerText || elements[i].textContent || '').replace(/\u00a0/g,' ').trim();
+      if(text && !seenText.has(text)){ seenText.add(text); messages.push(text); }
     }
     var body=(document.body && document.body.innerText || '').toLowerCase();
     return JSON.stringify({
-      text: messages.length ? (greedy ? messages[0] : messages[messages.length-1]) : '',
+      text: messages.length ? messages[messages.length-1] : '',
       count: messages.length,
       loading: isLoading,
       inputFound: inputFound,
-      greedy: greedy,
-      loginLikely: /登录|登錄|sign in|log in|扫码|掃碼|verify your account/.test(body),
+      loginLikely: /登录|登入|sign in|log in|验证码|验证|verify your account/.test(body),
       url: location.href
     });
   }catch(e){ return JSON.stringify({error:String(e),url:location.href}); }

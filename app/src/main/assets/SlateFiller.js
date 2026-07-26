@@ -214,58 +214,169 @@
     return JSON.stringify({ ok: false, reason: 'NO_SEND_BUTTON' });
   };
 
-  // ===== 回复监听（贪婪匹配） =====
-  window.__watchReply = function () {
-    if (window.__replyWatcher) return;
-    window.__replyWatcher = true;
+  // ===== Request-scoped reply watcher =====
+  window.__replyWatchers = window.__replyWatchers || {};
 
+  window.__cancelReplyWatcher = function (requestId) {
+    var watcher = window.__replyWatchers[String(requestId)];
+    if (!watcher) return false;
+    if (watcher.timer) clearInterval(watcher.timer);
+    if (watcher.observer) watcher.observer.disconnect();
+    delete window.__replyWatchers[String(requestId)];
+    return true;
+  };
+
+  window.__watchReply = function (options) {
+    options = options || {};
+    var requestId = String(options.requestId || Date.now());
+    window.__cancelReplyWatcher(requestId);
+
+    var replySelectors = options.replySelectors || [];
+    var loadingSelectors = options.loadingSelectors || [];
+    var fallbackSelectors = [
+      '[data-role="assistant"]',
+      '[data-message-author-role="assistant"]',
+      '[data-testid*="assistant"]',
+      '[class*="assistant-message"]',
+      '[class*="message-assistant"]',
+      '.ds-markdown', '.qwen-markdown', '.markdown-body', '.prose'
+    ];
+    var baselineCount = Number(options.baselineCount || 0);
+    var baselineText = String(options.baselineText || '').trim();
+    var sentMessage = String(options.sentMessage || '').trim();
+    var timeoutMs = Math.max(10000, Number(options.timeoutMs || 150000));
+    var deadline = Date.now() + timeoutMs;
     var lastText = '';
-    var stableCount = 0;
-    var lastChangeTime = Date.now();
+    var stablePolls = 0;
+    var checking = false;
 
-    function getAllText() {
-      var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      var texts = [];
-      var node;
-      while (node = walker.nextNode()) {
-        var p = node.parentElement;
-        if (!p) continue;
-        var s = window.getComputedStyle(p);
-        if (s.display === 'none' || s.visibility === 'hidden') continue;
-        var t = node.textContent.trim();
-        if (t.length > 20) texts.push(t);
-      }
-      return texts.sort(function(a,b){ return b.length - a.length; }).slice(0,5);
-    }
-
-    function checkReply() {
-      var texts = getAllText();
-      if (texts.length === 0) return;
-      var longest = texts[0];
-      if (longest === lastText) {
-        stableCount++;
-      } else {
-        lastText = longest;
-        stableCount = 0;
-        lastChangeTime = Date.now();
-      }
-      var elapsed = Date.now() - lastChangeTime;
-      if (stableCount >= 3 && longest.length > 30 && elapsed > 2000) {
-        try {
-          if (window.Android && window.Android.onReply) {
-            window.Android.onReply(longest);
+    function roots() {
+      var result = [document], queue = [document];
+      while (queue.length) {
+        var root = queue.shift();
+        var all = root.querySelectorAll ? root.querySelectorAll('*') : [];
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].shadowRoot) {
+            result.push(all[i].shadowRoot);
+            queue.push(all[i].shadowRoot);
           }
-        } catch(e) {}
-        window.__replyWatcher = false;
+        }
+      }
+      return result;
+    }
+
+    function visible(el) {
+      if (!el) return false;
+      var style = getComputedStyle(el);
+      var rect = el.getBoundingClientRect();
+      return !el.hidden && style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    }
+
+    function isUserMessage(el) {
+      return !!(el.closest && el.closest(
+        '[data-role="user"],[data-message-author-role="user"],[data-testid*="user"],'+
+        '[class*="user-message"],[class*="message-user"],[class*="human-message"]'
+      ));
+    }
+
+    function collectElements(selectors) {
+      var rs = roots(), elements = [], seen = new Set();
+      for (var s = 0; s < selectors.length; s++) {
+        for (var r = 0; r < rs.length; r++) {
+          var nodes = [];
+          try { nodes = rs[r].querySelectorAll(selectors[s]); } catch (ignore) {}
+          for (var n = 0; n < nodes.length; n++) {
+            var el = nodes[n];
+            if (!seen.has(el) && visible(el) && !isUserMessage(el) &&
+                el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT' && !el.isContentEditable) {
+              seen.add(el);
+              elements.push(el);
+            }
+          }
+        }
+      }
+      elements.sort(function (a, b) {
+        if (a === b) return 0;
+        var relation = a.compareDocumentPosition ? a.compareDocumentPosition(b) : 0;
+        if (relation & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if (relation & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+      });
+      return elements;
+    }
+
+    function snapshot() {
+      var elements = collectElements(replySelectors);
+      if (!elements.length) elements = collectElements(fallbackSelectors);
+      var texts = [], seenText = new Set();
+      for (var i = 0; i < elements.length; i++) {
+        var text = (elements[i].innerText || elements[i].textContent || '').replace(/\u00a0/g, ' ').trim();
+        if (text && !seenText.has(text)) {
+          seenText.add(text);
+          texts.push(text);
+        }
+      }
+
+      var loading = false, rs = roots();
+      for (var s = 0; s < loadingSelectors.length; s++) {
+        for (var r = 0; r < rs.length; r++) {
+          var nodes = [];
+          try { nodes = rs[r].querySelectorAll(loadingSelectors[s]); } catch (ignore) {}
+          for (var n = 0; n < nodes.length; n++) if (visible(nodes[n])) loading = true;
+        }
+      }
+      return { text: texts.length ? texts[texts.length - 1] : '', count: texts.length, loading: loading };
+    }
+
+    function finish(text) {
+      window.__cancelReplyWatcher(requestId);
+      try {
+        if (window.Android && window.Android.onReplyForRequest) {
+          window.Android.onReplyForRequest(requestId, text);
+        }
+      } catch (error) {
+        console.warn('[SlateFiller] reply bridge failed:', error);
       }
     }
 
-    setInterval(checkReply, 800);
-    var mo = new MutationObserver(function(){
-      lastChangeTime = Date.now();
-      stableCount = 0;
+    function check() {
+      if (checking) return;
+      checking = true;
+      try {
+        if (Date.now() >= deadline) {
+          window.__cancelReplyWatcher(requestId);
+          return;
+        }
+        var current = snapshot();
+        var text = String(current.text || '').trim();
+        var isNew = text && text !== sentMessage &&
+          (current.count > baselineCount || text !== baselineText);
+        if (isNew && text === lastText) stablePolls += 1;
+        else {
+          lastText = isNew ? text : lastText;
+          stablePolls = 0;
+        }
+        var required = current.loading ? 10 : 3;
+        if (isNew && stablePolls >= required) finish(text);
+      } finally {
+        checking = false;
+      }
+    }
+
+    var watcher = {
+      timer: setInterval(check, 800),
+      observer: new MutationObserver(function () {
+        setTimeout(check, 120);
+      })
+    };
+    window.__replyWatchers[requestId] = watcher;
+    watcher.observer.observe(document.documentElement || document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true
     });
-    mo.observe(document.body, {childList:true, subtree:true, characterData:true});
+    check();
+    return true;
   };
 
   console.log('[SlateFiller] ready');

@@ -34,6 +34,7 @@ import com.qtwl.YitongAIzhuanzhan.IpHelper
 import com.qtwl.YitongAIzhuanzhan.R
 import com.qtwl.YitongAIzhuanzhan.ui.components.GlassCard
 import com.qtwl.YitongAIzhuanzhan.ui.theme.*
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,9 +48,46 @@ fun SettingsScreen(
     var gatewayEnabled by remember { mutableStateOf(GatewayPrefs.isEnabled(context)) }
     var gatewayPort by remember { mutableStateOf(GatewayPrefs.getPort(context)) }
     var gatewayApiKey by remember { mutableStateOf(GatewayPrefs.getApiKey(context)) }
+    var gatewayRuntimeState by remember { mutableStateOf(GatewayService.state()) }
+    var gatewayError by remember { mutableStateOf(GatewayService.lastError()) }
     var showApiKey by remember { mutableStateOf(false) }
     var customUa by remember { mutableStateOf(GatewayPrefs.getUserAgent(context)) }
     var textZoom by remember { mutableIntStateOf(GatewayPrefs.getTextZoom(context)) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            gatewayEnabled = GatewayPrefs.isEnabled(context)
+            gatewayRuntimeState = GatewayService.state()
+            gatewayError = GatewayService.lastError()
+            delay(400L)
+        }
+    }
+
+    LaunchedEffect(gatewayPort) {
+        delay(700L)
+        val requestedPort = gatewayPort.toIntOrNull()?.takeIf { it in 1..65535 }
+        if (
+            requestedPort != null &&
+            gatewayEnabled &&
+            GatewayService.activePort() != null &&
+            GatewayService.activePort() != requestedPort
+        ) {
+            GatewayService.restart(context)
+        }
+    }
+
+    val gatewayStatusText = when (gatewayRuntimeState) {
+        GatewayService.RuntimeState.RUNNING -> stringResource(R.string.gateway_running)
+        GatewayService.RuntimeState.STARTING -> stringResource(R.string.gateway_starting)
+        GatewayService.RuntimeState.ERROR -> stringResource(R.string.gateway_start_failed)
+        GatewayService.RuntimeState.STOPPED -> stringResource(R.string.gateway_stopped)
+    }
+    val gatewayStatusColor = when (gatewayRuntimeState) {
+        GatewayService.RuntimeState.RUNNING -> AppleGreen
+        GatewayService.RuntimeState.STARTING -> AppleOrange
+        GatewayService.RuntimeState.ERROR -> AppleRed
+        GatewayService.RuntimeState.STOPPED -> if (isDark) AppleGray2 else AppleGray
+    }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -113,15 +151,11 @@ fun SettingsScreen(
                     }
                     Switch(
                         checked = gatewayEnabled,
-                        onCheckedChange = {
-                            gatewayEnabled = it
-                            GatewayPrefs.setEnabled(context, it)
-                            if (it) {
-                                try {
-                                    GatewayService.start(context)
-                                } catch (e: Exception) {
-                                    // 通知权限未授权时失败
-                                }
+                        onCheckedChange = { enabled ->
+                            gatewayEnabled = enabled
+                            if (enabled) {
+                                runCatching { GatewayService.start(context) }
+                                    .onFailure { gatewayError = it.message }
                             } else {
                                 GatewayService.stop(context)
                             }
@@ -173,7 +207,8 @@ fun SettingsScreen(
                         )
                     }
                     val ips = IpHelper.getAllIps()
-                    val ipText = if (ips.isNotEmpty()) ips.joinToString(", ") { "$it:7773" } else "未连接网络"
+                    val displayedPort = gatewayPort.toIntOrNull()?.takeIf { it in 1..65535 } ?: GatewayPrefs.DEFAULT_PORT
+                    val ipText = if (ips.isNotEmpty()) ips.joinToString(", ") { "$it:$displayedPort" } else "暂无可用地址"
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -208,7 +243,7 @@ fun SettingsScreen(
                     ConfigField(
                         label = stringResource(R.string.gateway_port),
                         value = gatewayPort,
-                        placeholder = "7773",
+                        placeholder = GatewayPrefs.DEFAULT_PORT.toString(),
                         onValueChange = {
                             gatewayPort = it
                             GatewayPrefs.setPort(context, it)
@@ -335,10 +370,18 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     StatusRow(
                         label = stringResource(R.string.running_status),
-                        value = if (gatewayEnabled) stringResource(R.string.gateway_running) else stringResource(R.string.gateway_stopped),
-                        valueColor = if (gatewayEnabled) AppleGreen else (if (isDark) AppleGray2 else AppleGray),
+                        value = gatewayStatusText,
+                        valueColor = gatewayStatusColor,
                         isDark = isDark
                     )
+                    gatewayError?.takeIf { it.isNotBlank() }?.let { error ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AppleRed
+                        )
+                    }
                     Spacer(Modifier.height(8.dp))
                     StatusRow(
                         label = stringResource(R.string.gateway_api_key),

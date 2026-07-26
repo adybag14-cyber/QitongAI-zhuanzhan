@@ -28,9 +28,9 @@ class MainActivity : ComponentActivity() {
         NotificationHelper.init(applicationContext)
 
         // 网关默认不启动（除非闪退重启）
-        // if (GatewayPrefs.isEnabled(applicationContext)) {
-        //     GatewayService.start(applicationContext)
-        // }
+        if (GatewayPrefs.isEnabled(applicationContext)) {
+            GatewayService.start(applicationContext)
+        }
 
         enableEdgeToEdge()
         setContent {
