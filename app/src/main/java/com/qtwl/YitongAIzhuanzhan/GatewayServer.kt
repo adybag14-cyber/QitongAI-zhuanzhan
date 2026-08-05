@@ -1,11 +1,14 @@
 package com.qtwl.YitongAIzhuanzhan
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 
 class GatewayServer(
     private val context: Context,
@@ -14,8 +17,8 @@ class GatewayServer(
 
     var onRequestReceived: ((String) -> Unit)? = null
     var onReplyReady: ((String) -> Unit)? = null
-
-    private val replyLatches = ConcurrentHashMap<String, java.util.concurrent.CountDownLatch>()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val replyLatches = ConcurrentHashMap<String, CountDownLatch>()
 
     override fun serve(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
         val uri = session.uri
@@ -33,6 +36,9 @@ class GatewayServer(
                     put("object", "list")
                     put("data", JSONArray().apply {
                         put(JSONObject().apply {
+                            put("id", "qtai-sj"); put("object", "model"); put("owned_by", "qitong")
+                        })
+                        put(JSONObject().apply {
                             put("id", "qtllq"); put("object", "model"); put("owned_by", "qitong")
                         })
                     })
@@ -49,6 +55,7 @@ class GatewayServer(
         val json = JSONObject(body)
         val stream = json.optBoolean("stream", false)
         val msgs = json.getJSONArray("messages")
+        val modelId = json.optString("model", "qtai-sj")
 
         var lastUser = ""
         for (i in msgs.length() - 1 downTo 0) {
@@ -59,33 +66,42 @@ class GatewayServer(
 
         onRequestReceived?.invoke(lastUser)
 
-        val wv = try { WebViewManager.getCurrentTab()?.webView } catch (e: Exception) { null }
-        if (wv == null) return jsonResponse("""{"error":"webview not ready"}""")
-
-        val latch = java.util.concurrent.CountDownLatch(1)
+        val latch = CountDownLatch(1)
         val key = lastUser.hashCode().toString()
         replyLatches[key] = latch
         var reply = ""
+        var done = false
 
-        try {
-            JsInjector.autoSendMessage(wv, lastUser) { success, result ->
-                reply = if (success) result else "$result"
+        // 必须在主线程执行 WebView 操作
+        mainHandler.post {
+            val wv = try { WebViewManager.getCurrentTab()?.webView } catch (e: Exception) { null }
+            if (wv == null) {
+                reply = "webview not ready"
+                replyLatches.remove(key)
+                latch.countDown()
+                return@post
+            }
+            try {
+                JsInjector.autoSendMessage(wv, lastUser, callback = { success, result ->
+                    reply = if (success) result else "$result"
+                    replyLatches.remove(key)
+                    latch.countDown()
+                })
+            } catch (e: Exception) {
+                reply = e.message ?: "error"
                 replyLatches.remove(key)
                 latch.countDown()
             }
-        } catch (e: Exception) {
-            replyLatches.remove(key)
-            latch.countDown()
         }
 
-        latch.await(60, java.util.concurrent.TimeUnit.SECONDS)
+        try { latch.await(120, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}
+        if (!done) { replyLatches.remove(key) }
         onReplyReady?.invoke(reply)
-
         return if (!stream) {
             val resp = JSONObject().apply {
-                put("id", "chatcmpl-qtllq-${System.currentTimeMillis()}")
+                put("id", "chatcmpl-${modelId}-${System.currentTimeMillis()}")
                 put("object", "chat.completion")
-                put("model", "qtllq")
+                put("model", modelId)
                 put("choices", JSONArray().apply {
                     put(JSONObject().apply {
                         put("index", 0)

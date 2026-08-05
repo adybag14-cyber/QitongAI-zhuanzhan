@@ -44,9 +44,7 @@ import com.qtwl.YitongAIzhuanzhan.ui.theme.*
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BrowserScreen(
-    onNavigateToAbout: () -> Unit
-) {
+fun BrowserScreen(onNavigateToAbout: () -> Unit) {
     val isDark = MaterialTheme.colorScheme.background == GlassBackgroundDark
     val context = LocalContext.current
     val newTabLabel = stringResource(R.string.new_tab)
@@ -115,63 +113,66 @@ fun BrowserScreen(
                     color = if (isDark) GlassBackgroundDark else GlassBackground,
                     tonalElevation = 0.dp
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = { showTabSwitcher = !showTabSwitcher },
+                    Column {
+                        Row(
                             modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark
-                                )
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Tab,
-                                contentDescription = stringResource(R.string.tabs),
-                                tint = if (isDark) AppleBlueLight else AppleBlue,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            IconButton(
+                                onClick = { showTabSwitcher = !showTabSwitcher },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark
+                                    )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Tab,
+                                    contentDescription = stringResource(R.string.tabs),
+                                    tint = if (isDark) AppleBlueLight else AppleBlue,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(Modifier.weight(1f))
+                            IconButton(
+    onClick = onNavigateToAbout,
+    modifier = Modifier
+        .size(32.dp)
+        .clip(CircleShape)
+        .background(
+            if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark
+        )
+) {
+    Icon(
+        imageVector = Icons.Outlined.Info,
+        contentDescription = stringResource(R.string.about),
+        tint = if (isDark) AppleBlueLight else AppleBlue,
+        modifier = Modifier.size(20.dp)
+    )
+}
                         }
-
-                        Spacer(Modifier.width(6.dp))
-
-                        Text(
-                            text = if (currentTab?.title?.isNotEmpty() == true) currentTab.title else stringResource(R.string.app_name),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isDark) AppleLabelDark else AppleLabel,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
-                        )
-
-                        Text(
-                            text = "${currentIndex + 1}/${tabs.size}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel,
-                            modifier = Modifier.padding(end = 4.dp)
-                        )
-
-                        IconButton(
-                            onClick = onNavigateToAbout,
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark
-                                )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Info,
-                                contentDescription = stringResource(R.string.about),
-                                tint = if (isDark) AppleBlueLight else AppleBlue,
-                                modifier = Modifier.size(20.dp)
+                            Text(
+                                text = if (currentTab?.title?.isNotEmpty() == true) currentTab.title else stringResource(R.string.app_name),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isDark) AppleLabelDark else AppleLabel,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
+                            )
+                            Text(
+                                text = "${currentIndex + 1}/${tabs.size}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel,
+                                modifier = Modifier.padding(end = 4.dp)
                             )
                         }
                     }
@@ -328,9 +329,9 @@ fun BrowserScreen(
                     onMessageChange = { aiMessage = it },
                     onSend = {
                         currentTab?.webView?.let { wv ->
-                            JsInjector.autoSendMessage(wv, aiMessage) { success, detail ->
-                                Toast.makeText(context, detail, Toast.LENGTH_SHORT).show()
-                            }
+                            JsInjector.autoSendMessage(wv, aiMessage, callback = { success, detail ->
+    Toast.makeText(context, detail, Toast.LENGTH_SHORT).show()
+})
                         }
                         showAiDialog = false
                     },
@@ -518,16 +519,16 @@ private fun BottomNavigationBar(
         ) {
             NavButton(Icons.Filled.ArrowBack, canGoBack, onBack, isDark)
             NavButton(Icons.Filled.ArrowForward, canGoForward, onForward, isDark)
-            NavButton(if (isLoading) Icons.Filled.Close else Icons.Filled.Refresh, true, if (isLoading) onStop else onRefresh, isDark, !isLoading)
+            NavButton(if (isLoading) Icons.Filled.Close else Icons.Filled.Refresh, true, if (isLoading) onStop else onRefresh, isDark)
             NavButton(Icons.Filled.Home, true, onHome, isDark)
-            NavButton(Icons.Filled.Add, true, onNewTab, isDark, true)
+            NavButton(Icons.Filled.Add, true, onNewTab, isDark)
             // 分隔线
             Box(modifier = Modifier.width(1.dp).height(24.dp).background(if (isDark) GlassBorderDark else GlassBorder, RoundedCornerShape(1.dp)))
             // 收藏按钮
             NavButton(Icons.Outlined.Bookmarks, true, onBookmarks, isDark)
             // AI 注入按钮
-            NavButton(Icons.Filled.Send, true, onAiDialog, isDark, true)
-            NavButton(Icons.Filled.AccountTree, true, onPipeline, isDark, true)
+            NavButton(Icons.Filled.Send, true, onAiDialog, isDark)
+            NavButton(Icons.Filled.AccountTree, true, onPipeline, isDark)
         }
     }
 }
@@ -535,18 +536,14 @@ private fun BottomNavigationBar(
 @Composable
 private fun NavButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    enabled: Boolean, onClick: () -> Unit, isDark: Boolean, isHighlight: Boolean = false
+    enabled: Boolean, onClick: () -> Unit, isDark: Boolean
 ) {
-    val bgColor = when {
-        isHighlight -> if (isDark) AppleBlue.copy(alpha = 0.15f) else AppleBlue.copy(alpha = 0.1f)
-        else -> Color.Transparent
+    val iconColor = if (enabled) {
+        if (isDark) AppleLabelDark else AppleLabel
+    } else {
+        if (isDark) AppleGray.copy(alpha = 0.3f) else AppleGray2.copy(alpha = 0.3f)
     }
-    val iconColor = when {
-        !enabled -> if (isDark) AppleGray.copy(alpha = 0.3f) else AppleGray2.copy(alpha = 0.3f)
-        isHighlight -> AppleBlue
-        else -> if (isDark) AppleLabelDark else AppleLabel
-    }
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(42.dp).clip(CircleShape).background(bgColor)) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(42.dp).clip(CircleShape)) {
         Icon(imageVector = icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(22.dp))
     }
 }

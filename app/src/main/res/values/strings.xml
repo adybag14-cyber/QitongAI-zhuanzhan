@@ -97,4 +97,11 @@
     <string name="pipeline_final_output">最终输出</string>
     <string name="pipeline_move_up">上移</string>
     <string name="pipeline_move_down">下移</string>
+<string name="chat_history_title">对话历史</string>
+<string name="chat_history_empty">暂无对话记录</string>
+<string name="chat_history_detail">对话详情</string>
+<string name="send_to">发送给 %1$s</string>
+<string name="ai_reply_title">AI 回复</string>
+<string name="copy_reply">复制回复</string>
+<string name="copied">已复制到剪贴板</string>
 </resources>

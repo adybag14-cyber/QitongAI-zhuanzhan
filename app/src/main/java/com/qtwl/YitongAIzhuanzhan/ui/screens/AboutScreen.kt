@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qtwl.YitongAIzhuanzhan.AppHider
 import com.qtwl.YitongAIzhuanzhan.BookmarkManager
+import com.qtwl.YitongAIzhuanzhan.BrowserBrainConfig
 import com.qtwl.YitongAIzhuanzhan.GatewayPrefs
 import com.qtwl.YitongAIzhuanzhan.GatewayService
 import com.qtwl.YitongAIzhuanzhan.IpHelper
@@ -47,7 +48,8 @@ fun AboutScreen(
     onBack: () -> Unit,
     onLanguageChanged: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
-    onNavigateToBookmarks: () -> Unit = {}
+    onNavigateToBookmarks: () -> Unit = {},
+    onNavigateToMcpBrowser: () -> Unit = {}
 ) {
     val isDark = MaterialTheme.colorScheme.background == GlassBackgroundDark
     val context = LocalContext.current
@@ -56,6 +58,7 @@ fun AboutScreen(
     val restoredDefaultMessage = stringResource(R.string.restored_default)
     val qqGroupCopiedMessage = stringResource(R.string.qq_group_copied)
     val qqGroupClipLabel = stringResource(R.string.qq_group_number_clip_label)
+    var showBrainConfig by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -101,6 +104,43 @@ fun AboutScreen(
             SectionTitle("网关设置", Icons.Outlined.PowerSettingsNew, isDark)
             GlassCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), elevation = 2.dp) {
                 LinkItem(Icons.Outlined.Settings, "网关配置", "端口、API Key、后台保活", onNavigateToSettings, isDark)
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // 浏览器设置
+            SectionTitle("浏览器设置", Icons.Outlined.Public, isDark)
+            GlassCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), elevation = 2.dp) {
+                Column {
+                    val brainEnabled = remember { mutableStateOf(BrowserBrainConfig.isEnabled(context)) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.Psychology, contentDescription = null, tint = if (isDark) AppleBlueLight else AppleBlue, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("浏览器大脑", style = MaterialTheme.typography.bodyLarge, color = if (isDark) AppleLabelDark else AppleLabel)
+                            Text("AI自动生成脚本并执行浏览器操作", style = MaterialTheme.typography.bodySmall, color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel)
+                        }
+                        Switch(
+                            checked = brainEnabled.value,
+                            onCheckedChange = { BrowserBrainConfig.setEnabled(context, it); brainEnabled.value = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = AppleBlue,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = if (isDark) AppleGray.copy(alpha = 0.4f) else AppleGray2.copy(alpha = 0.5f)
+                            )
+                        )
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = if (isDark) GlassBorderDark else GlassBorder)
+                    LinkItem(Icons.Outlined.Tune, "大脑配置", "API地址、模型名", {
+                        showBrainConfig = true
+                    }, isDark)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = if (isDark) GlassBorderDark else GlassBorder)
+                    LinkItem(Icons.Outlined.TravelExplore, "MCP浏览器", "独立浏览器，专供MCP对接", onNavigateToMcpBrowser, isDark)
+                }
             }
 
             Spacer(Modifier.height(20.dp))
@@ -188,6 +228,7 @@ fun AboutScreen(
             Text(stringResource(R.string.copyright), style = MaterialTheme.typography.bodySmall, color = if (isDark) AppleTertiaryLabelDark else AppleTertiaryLabel, modifier = Modifier.padding(bottom = 32.dp))
         }
     }
+    BrainConfigDialog(context, isDark, showBrainConfig) { showBrainConfig = false }
 }
 
 @Composable
@@ -224,6 +265,90 @@ private fun LanguageSettings(isDark: Boolean, currentLang: Int, onLanguageSelect
         }
     }
 }
+
+@Composable
+private fun BrainConfigDialog(context: Context, isDark: Boolean, showDialog: Boolean, onDismiss: () -> Unit) {
+    var baseUrl by remember { mutableStateOf(BrowserBrainConfig.getBaseUrl(context)) }
+    var apiKey by remember { mutableStateOf(BrowserBrainConfig.getApiKey(context)) }
+    var model by remember { mutableStateOf(BrowserBrainConfig.getModel(context)) }
+    var mcpPort by remember { mutableStateOf(BrowserBrainConfig.getMcpPort(context).toString()) }
+    var mcpEnabled by remember { mutableStateOf(BrowserBrainConfig.isMcpEnabled(context)) }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            containerColor = if (isDark) GlassBackgroundDark else GlassBackground,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Tune, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("大脑配置", fontWeight = FontWeight.SemiBold)
+                }
+            },
+            text = {
+                Column {
+                    Text("API地址", style = MaterialTheme.typography.bodySmall, color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel)
+                    OutlinedTextField(value = baseUrl, onValueChange = { baseUrl = it },
+                        modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
+                        singleLine = true, placeholder = { Text("http://localhost:8889") },
+                        colors = brainFieldColors(isDark), shape = RoundedCornerShape(10.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text("API Key（可选）", style = MaterialTheme.typography.bodySmall, color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel)
+                    OutlinedTextField(value = apiKey, onValueChange = { apiKey = it },
+                        modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
+                        singleLine = true, placeholder = { Text("sk-...") },
+                        colors = brainFieldColors(isDark), shape = RoundedCornerShape(10.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text("模型名", style = MaterialTheme.typography.bodySmall, color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel)
+                    OutlinedTextField(value = model, onValueChange = { model = it },
+                        modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
+                        singleLine = true, placeholder = { Text("qtllq") },
+                        colors = brainFieldColors(isDark), shape = RoundedCornerShape(10.dp))
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider(color = if (isDark) GlassBorderDark else GlassBorder)
+                    Spacer(Modifier.height(12.dp))
+                    Text("MCP服务", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = if (isDark) AppleLabelDark else AppleLabel)
+                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("启用MCP", style = MaterialTheme.typography.bodySmall, color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel, modifier = Modifier.weight(1f))
+                        Switch(checked = mcpEnabled, onCheckedChange = { mcpEnabled = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = AppleBlue,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = if (isDark) AppleGray.copy(alpha = 0.4f) else AppleGray2.copy(alpha = 0.5f)))
+                    }
+                    Text("MCP端口", style = MaterialTheme.typography.bodySmall, color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel)
+                    OutlinedTextField(value = mcpPort, onValueChange = { mcpPort = it },
+                        modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
+                        singleLine = true, placeholder = { Text("7774") },
+                        colors = brainFieldColors(isDark), shape = RoundedCornerShape(10.dp))
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    BrowserBrainConfig.setBaseUrl(context, baseUrl)
+                    BrowserBrainConfig.setApiKey(context, apiKey)
+                    BrowserBrainConfig.setModel(context, model)
+                    BrowserBrainConfig.setMcpEnabled(context, mcpEnabled)
+                    mcpPort.toIntOrNull()?.let { BrowserBrainConfig.setMcpPort(context, it) }
+                    onDismiss()
+                }, colors = ButtonDefaults.buttonColors(containerColor = AppleBlue), shape = RoundedCornerShape(10.dp)) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            }
+        )
+    }
+}
+
+@Composable
+private fun brainFieldColors(isDark: Boolean) = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = AppleBlue.copy(alpha = 0.5f),
+    unfocusedBorderColor = if (isDark) GlassBorderDark else GlassBorder,
+    cursorColor = AppleBlue,
+    focusedTextColor = if (isDark) AppleLabelDark else AppleLabel,
+    unfocusedTextColor = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel
+)
 
 @Composable
 private fun LinkItem(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit, isDark: Boolean) {

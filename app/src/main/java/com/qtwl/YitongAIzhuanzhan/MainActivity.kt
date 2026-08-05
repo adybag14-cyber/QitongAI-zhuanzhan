@@ -9,8 +9,8 @@ import androidx.compose.runtime.*
 import com.qtwl.YitongAIzhuanzhan.ui.screens.AboutScreen
 import com.qtwl.YitongAIzhuanzhan.ui.screens.BookmarkEditScreen
 import com.qtwl.YitongAIzhuanzhan.ui.screens.BrowserScreen
+import com.qtwl.YitongAIzhuanzhan.ui.screens.McpBrowserScreen
 import com.qtwl.YitongAIzhuanzhan.ui.screens.SettingsScreen
-import com.qtwl.YitongAIzhuanzhan.GatewayPrefs
 import com.qtwl.YitongAIzhuanzhan.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
@@ -24,13 +24,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         appContext = applicationContext
 
-        // 初始化通知渠道
         NotificationHelper.init(applicationContext)
-
-        // 网关默认不启动（除非闪退重启）
-        // if (GatewayPrefs.isEnabled(applicationContext)) {
-        //     GatewayService.start(applicationContext)
-        // }
 
         enableEdgeToEdge()
         setContent {
@@ -49,8 +43,12 @@ class MainActivity : ComponentActivity() {
                             onBack = { currentScreen = "browser" },
                             onLanguageChanged = { recreate() },
                             onNavigateToSettings = { currentScreen = "settings" },
-                            onNavigateToBookmarks = { currentScreen = "bookmarks" }
+                            onNavigateToBookmarks = { currentScreen = "bookmarks" },
+                            onNavigateToMcpBrowser = { currentScreen = "mcp_browser" }
                         )
+                    }
+                    "mcp_browser" -> {
+                        McpBrowserScreen(onBack = { currentScreen = "about" })
                     }
                     else -> {
                         BrowserScreen(onNavigateToAbout = { currentScreen = "about" })

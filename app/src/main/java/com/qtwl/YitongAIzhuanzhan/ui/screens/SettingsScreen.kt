@@ -172,34 +172,52 @@ fun SettingsScreen(
                             color = if (isDark) AppleLabelDark else AppleLabel
                         )
                     }
-                    val ips = IpHelper.getAllIps()
-                    val ipText = if (ips.isNotEmpty()) ips.joinToString(", ") { "$it:7773" } else "未连接网络"
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark)
-                            .clickable {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("网关地址", ipText))
-                                Toast.makeText(context, "已复制地址", Toast.LENGTH_SHORT).show()
+                    val ips = run {
+                        val list = IpHelper.getAllIps().toMutableList()
+                        if (!list.contains("127.0.0.1")) list.add(0, "127.0.0.1")
+                        if (!list.contains("localhost")) list.add(0, "localhost")
+                        list
+                    }
+                    Column {
+                        if (ips.isNotEmpty()) {
+                            ips.forEach { ip ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isDark) GlassSurfaceDarkMode2 else GlassSurfaceDark)
+                                        .clickable {
+                                            val text = "$ip:${gatewayPort}"
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("网关地址", text))
+                                            Toast.makeText(context, "已复制 $text", Toast.LENGTH_SHORT).show()
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "$ip:${gatewayPort}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isDark) AppleLabelDark else AppleLabel,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Outlined.ContentCopy,
+                                        contentDescription = "复制",
+                                        tint = if (isDark) AppleBlueLight else AppleBlue,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = ipText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isDark) AppleLabelDark else AppleLabel,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Icon(
-                            imageVector = Icons.Outlined.ContentCopy,
-                            contentDescription = "复制",
-                            tint = if (isDark) AppleBlueLight else AppleBlue,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        } else {
+                            Text(
+                                text = "未连接网络",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) AppleSecondaryLabelDark else AppleSecondaryLabel,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
                     }
 
                     Spacer(Modifier.height(12.dp))
@@ -210,8 +228,13 @@ fun SettingsScreen(
                         value = gatewayPort,
                         placeholder = "7773",
                         onValueChange = {
+                            val oldPort = gatewayPort
                             gatewayPort = it
                             GatewayPrefs.setPort(context, it)
+                            if (gatewayEnabled && oldPort != it) {
+                                GatewayService.stop(context)
+                                GatewayService.start(context)
+                            }
                         },
                         isDark = isDark,
                         icon = Icons.Outlined.Router,

@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -11,8 +12,8 @@ android {
         applicationId = "com.qtwl.YitongAIzhuanzhan"
         minSdk = 24
         targetSdk = 35
-        versionCode = 31
-        versionName = "1.0.1-3"
+        versionCode = 33
+versionName = "1.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -71,6 +72,9 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    annotationProcessor(libs.androidx.room.compiler)
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation("androidx.core:core-ktx:1.10.1")
     testImplementation(libs.junit)

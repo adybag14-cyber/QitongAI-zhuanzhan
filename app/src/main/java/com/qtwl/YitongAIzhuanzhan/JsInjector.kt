@@ -472,7 +472,7 @@ object JsInjector {
       var style=getComputedStyle(el);
       return !el.hidden && style.display!=='none' && style.visibility!=='hidden';
     }
-    var rs=roots(), messages=[], seen=new Set(), inputFound=false, isLoading=false;
+    var rs=roots(), inputFound=false, isLoading=false;
     for(var s=0;s<inputSelectors.length;s++) for(var r=0;r<rs.length;r++){
       var input=rs[r].querySelector(inputSelectors[s]); if(usable(input)) inputFound=true;
     }
@@ -480,42 +480,41 @@ object JsInjector {
       var nodes=rs[r].querySelectorAll(loadingSelectors[s]);
       for(var n=0;n<nodes.length;n++) if(usable(nodes[n])) isLoading=true;
     }
+    var messages=[], seen=new Set();
     for(var s=0;s<replySelectors.length;s++) for(var r=0;r<rs.length;r++){
       var nodes=rs[r].querySelectorAll(replySelectors[s]);
       for(var n=0;n<nodes.length;n++){
         var el=nodes[n]; if(!usable(el)) continue;
         if(el.tagName==='TEXTAREA' || el.tagName==='INPUT' || el.isContentEditable) continue;
         if(el.closest && el.closest("[data-role='user'],[data-message-author-role='user'],[data-testid*='user'],[class*='user-message'],[class*='message-user']")) continue;
-        var text=(el.innerText || el.textContent || '').replace(/\\u00a0/g,' ').trim();
+        var text=(el.innerText || el.textContent || '').replace(/\u00a0/g,' ').trim();
         if(text && !seen.has(text)){ seen.add(text); messages.push(text); }
       }
     }
-    var greedy=false;
     if(messages.length === 0){
-      greedy=true;
       var walker=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      var candidates=[];
+      var pageTexts=[];
       var node;
       while(node=walker.nextNode()){
         var p=node.parentElement;
         if(!p) continue;
+        if(p.tagName==='SCRIPT'||p.tagName==='STYLE'||p.tagName==='NOSCRIPT') continue;
         var st=getComputedStyle(p);
         if(st.display==='none'||st.visibility==='hidden') continue;
         var t=node.textContent.trim();
-        if(t.length>100&&!/登录|注册|隐私|条款|协议|Copyright|All rights|首页|关于|联系/.test(t)){
-          candidates.push(t);
-        }
+        if(t.length>20) pageTexts.push(t);
       }
-      candidates.sort(function(a,b){return b.length-a.length;});
-      if(candidates.length>0&&!seen.has(candidates[0])){seen.add(candidates[0]);messages.push(candidates[0]);}
+      pageTexts.sort(function(a,b){return b.length-a.length;});
+      for(var i=0;i<Math.min(10,pageTexts.length);i++){
+        if(!seen.has(pageTexts[i])){ seen.add(pageTexts[i]); messages.push(pageTexts[i]); }
+      }
     }
     var body=(document.body && document.body.innerText || '').toLowerCase();
     return JSON.stringify({
-      text: messages.length ? (greedy ? messages[0] : messages[messages.length-1]) : '',
+      text: messages.length ? messages[messages.length-1] : '',
       count: messages.length,
       loading: isLoading,
       inputFound: inputFound,
-      greedy: greedy,
       loginLikely: /登录|登錄|sign in|log in|扫码|掃碼|verify your account/.test(body),
       url: location.href
     });
@@ -562,21 +561,30 @@ object JsInjector {
         }
     }
 
-    fun autoSendMessage(
-        webView: WebView,
-        message: String,
-        callback: ((Boolean, String) -> Unit)? = null
-    ) {
-        webView.evaluateJavascript("(function(){return location.href})()") { rawUrl ->
-            val platform = AiPlatformRegistry.detect(decodeJavascriptValue(rawUrl))
-            sendAndAwaitReply(platform.id, webView, message) { result ->
-                callback?.invoke(
-                    result.success,
-                    if (result.success) result.response else result.detail
-                )
+fun autoSendMessage(
+    webView: WebView,
+    message: String,
+    callback: ((Boolean, String) -> Unit)? = null,
+    platformId: String? = null
+) {
+    fun doSend(pid: String) {
+        sendAndAwaitReply(pid, webView, message) { result ->
+            val def = AiPlatformRegistry.get(pid) ?: AiPlatformRegistry.generic()
+            if (result.success) {
+                ChatHistoryManager.saveMessage(webView.context, pid, def.displayName, message, result.response)
             }
+            callback?.invoke(result.success, if (result.success) result.response else result.detail)
         }
     }
+    if (platformId != null) {
+        doSend(platformId)
+    } else {
+        webView.evaluateJavascript("(function(){return location.href})()") { rawUrl ->
+            val detected = AiPlatformRegistry.detect(decodeJavascriptValue(rawUrl))
+            doSend(detected.id)
+        }
+    }
+}
 
     fun extractChat(webView: WebView, callback: ((String) -> Unit)? = null) {
         injectJs(webView, getExtractScript(), callback)

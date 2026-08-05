@@ -30,27 +30,35 @@ object AiPlatformRegistry {
                 "textarea[data-testid='chat_input_input']",
                 "textarea[placeholder*='输入消息']",
                 "textarea[placeholder*='message']",
-                "textarea"
+                "div[contenteditable='true']",
+                "textarea",
+                "[role='textbox']"
             ),
             sendButtonSelectors = listOf(
                 "#flow-end-msg-send",
                 "button[data-testid*='send']",
                 "button[aria-label*='发送']",
-                "button[aria-label*='Send']"
+                "button[aria-label*='Send']",
+                "button[class*='send']"
             ),
             assistantMessageSelectors = listOf(
                 "[data-testid='message_text_content']",
-                ".message-bubble .markdown-body",
                 "[data-testid*='assistant'] .markdown-body",
-                "[data-role='assistant']"
+                "[data-testid*='assistant'] [class*='content']",
+                ".message-bubble .markdown-body",
+                "[data-role='assistant']",
+                "[class*='message-content']",
+                "[class*='chat-message'] [class*='content']"
             ),
             loadingSelectors = listOf(
                 "[aria-busy='true']",
                 ".loading-spinner",
                 "button[aria-label*='停止']",
-                "button[aria-label*='Stop']"
+                "button[aria-label*='Stop']",
+                "[class*='streaming']",
+                "[class*='generating']"
             ),
-            afterFillDelayMs = 650L
+            afterFillDelayMs = 800L
         ),
         AiPlatformDefinition(
             id = "yuanbao",
