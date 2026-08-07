@@ -42,7 +42,12 @@ class GatewayService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> startGateway()
-            ACTION_STOP -> { gateway?.stop(); stopForeground(true); stopSelf() }
+            ACTION_STOP -> {
+                gateway?.stop()
+                gateway = null
+                stopForeground(true)
+                stopSelf()
+            }
         }
         return START_STICKY
     }
@@ -51,11 +56,26 @@ class GatewayService : Service() {
         val port = GatewayPrefs.getPort(this).toIntOrNull() ?: 7773
         val notification = buildNotif("綦桐AI转站", "网关运行中 · 端口 $port · 等待请求...")
         startForeground(NOTIF_ID, notification)
+
+        if (gateway?.isRunning() == true) {
+            updateNotif("綦桐AI转站", "网关已运行 · 端口 $port")
+            return
+        }
+
+        gateway?.stop()
         gateway = GatewayServer(this, port).apply {
             onRequestReceived = { prompt -> updateNotif("处理中", "${prompt.take(30)}...") }
             onReplyReady = { reply -> updateNotif("綦桐AI转站", "回复完成 (${reply.length}字)") }
+            onRequestFailed = { error -> updateNotif("綦桐AI转站", "请求失败: ${error.take(60)}") }
         }
-        gateway?.startServer()
+        if (gateway?.startServer() == true) {
+            updateNotif("綦桐AI转站", "网关运行中 · 端口 $port")
+        } else {
+            gateway = null
+            updateNotif("綦桐AI转站", "网关启动失败 · 端口 $port")
+            stopForeground(true)
+            stopSelf()
+        }
     }
 
     private fun buildNotif(title: String, text: String): Notification {
@@ -75,5 +95,9 @@ class GatewayService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-    override fun onDestroy() { gateway?.stop(); super.onDestroy() }
+    override fun onDestroy() {
+        gateway?.stop()
+        gateway = null
+        super.onDestroy()
+    }
 }

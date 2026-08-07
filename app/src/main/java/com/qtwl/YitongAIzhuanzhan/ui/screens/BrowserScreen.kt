@@ -6,9 +6,8 @@ import android.webkit.*
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -107,6 +106,10 @@ fun BrowserScreen(onNavigateToAbout: () -> Unit) {
 
     Scaffold(
         containerColor = Color.Transparent,
+        // Top and bottom app bars own the system-bar insets explicitly.
+        // Disable Scaffold insets so edge-to-edge Android versions do not
+        // apply a second offset around the WebView content.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             Column {
                 Surface(
@@ -509,26 +512,56 @@ private fun BottomNavigationBar(
     onPipeline: () -> Unit,
     isDark: Boolean
 ) {
-    val scrollState = rememberScrollState()
-    Surface(color = if (isDark) GlassBackgroundDark else GlassBackground, tonalElevation = 0.dp, shadowElevation = 8.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp)
-                .horizontalScroll(scrollState),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
+    Surface(
+        color = if (isDark) GlassBackgroundDark else GlassBackground,
+        tonalElevation = 0.dp,
+        shadowElevation = 8.dp
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
         ) {
-            NavButton(Icons.Filled.ArrowBack, canGoBack, onBack, isDark)
-            NavButton(Icons.Filled.ArrowForward, canGoForward, onForward, isDark)
-            NavButton(if (isLoading) Icons.Filled.Close else Icons.Filled.Refresh, true, if (isLoading) onStop else onRefresh, isDark)
-            NavButton(Icons.Filled.Home, true, onHome, isDark)
-            NavButton(Icons.Filled.Add, true, onNewTab, isDark)
-            // 分隔线
-            Box(modifier = Modifier.width(1.dp).height(24.dp).background(if (isDark) GlassBorderDark else GlassBorder, RoundedCornerShape(1.dp)))
-            // 收藏按钮
-            NavButton(Icons.Outlined.Bookmarks, true, onBookmarks, isDark)
-            // AI 注入按钮
-            NavButton(Icons.Filled.Send, true, onAiDialog, isDark)
-            NavButton(Icons.Filled.AccountTree, true, onPipeline, isDark)
+            // Eight actions overflow the old fixed-width toolbar on compact
+            // phones. Fit and center them instead of starting a scroll row at
+            // an apparently shifted horizontal position.
+            val compact = maxWidth < 380.dp
+            val buttonSize = if (compact) 36.dp else 42.dp
+            val iconSize = if (compact) 20.dp else 22.dp
+            val horizontalPadding = if (compact) 4.dp else 8.dp
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = horizontalPadding, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                NavButton(Icons.Filled.ArrowBack, canGoBack, onBack, isDark, buttonSize, iconSize)
+                NavButton(Icons.Filled.ArrowForward, canGoForward, onForward, isDark, buttonSize, iconSize)
+                NavButton(
+                    if (isLoading) Icons.Filled.Close else Icons.Filled.Refresh,
+                    true,
+                    if (isLoading) onStop else onRefresh,
+                    isDark,
+                    buttonSize,
+                    iconSize
+                )
+                NavButton(Icons.Filled.Home, true, onHome, isDark, buttonSize, iconSize)
+                NavButton(Icons.Filled.Add, true, onNewTab, isDark, buttonSize, iconSize)
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(24.dp)
+                        .background(
+                            if (isDark) GlassBorderDark else GlassBorder,
+                            RoundedCornerShape(1.dp)
+                        )
+                )
+                NavButton(Icons.Outlined.Bookmarks, true, onBookmarks, isDark, buttonSize, iconSize)
+                NavButton(Icons.Filled.Send, true, onAiDialog, isDark, buttonSize, iconSize)
+                NavButton(Icons.Filled.AccountTree, true, onPipeline, isDark, buttonSize, iconSize)
+            }
         }
     }
 }
@@ -536,15 +569,28 @@ private fun BottomNavigationBar(
 @Composable
 private fun NavButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    enabled: Boolean, onClick: () -> Unit, isDark: Boolean
+    enabled: Boolean,
+    onClick: () -> Unit,
+    isDark: Boolean,
+    buttonSize: androidx.compose.ui.unit.Dp,
+    iconSize: androidx.compose.ui.unit.Dp
 ) {
     val iconColor = if (enabled) {
         if (isDark) AppleLabelDark else AppleLabel
     } else {
         if (isDark) AppleGray.copy(alpha = 0.3f) else AppleGray2.copy(alpha = 0.3f)
     }
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(42.dp).clip(CircleShape)) {
-        Icon(imageVector = icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(22.dp))
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(buttonSize).clip(CircleShape)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = iconColor,
+            modifier = Modifier.size(iconSize)
+        )
     }
 }
 

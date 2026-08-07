@@ -108,16 +108,30 @@ object WebViewManager {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
 
-            // ✅ Android JS 桥 — 每个 WebView 创建时注册
+            // Register one bridge per WebView. Request-scoped replies are routed to
+            // the exact automation that armed the JavaScript watcher.
             addJavascriptInterface(object {
+                @JavascriptInterface
+                fun onReplyForRequest(requestId: String, content: String) {
+                    Handler(Looper.getMainLooper()).post {
+                        val delivered = ReplyBridge.deliver(requestId, content)
+                        if (delivered && content.isNotBlank()) {
+                            onReply(content)
+                            NotificationHelper.showReply(appContext, tabId.toString(), content)
+                        }
+                    }
+                }
+
                 @JavascriptInterface
                 fun onReply(content: String) {
                     Handler(Looper.getMainLooper()).post {
-                        onReply(content)
-                        // 同时更新通知栏
-                        NotificationHelper.showReply(appContext, tabId.toString(), content)
+                        if (content.isNotBlank()) {
+                            onReply(content)
+                            NotificationHelper.showReply(appContext, tabId.toString(), content)
+                        }
                     }
                 }
+
                 @JavascriptInterface
                 fun onStatus(msg: String) {
                     Handler(Looper.getMainLooper()).post {

@@ -1,13 +1,16 @@
 package com.qtwl.YitongAIzhuanzhan
 
+import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -145,6 +148,148 @@ class PipelineWebViewInstrumentedTest {
         assertEquals("reply", captured.get().stage)
     }
 
+    @Test
+    fun freshAssistantBeatsStaleReplySidebarAndPreservesMarkdown() {
+        val fixture = createHtmlFixture(
+            baseUrl = "https://chat.deepseek.com/",
+            bodyHtml = """
+                <aside>
+                  <div class="markdown-body">
+                    SIDEBAR CHROME SHOULD NEVER WIN even when this block is deliberately much
+                    longer than the actual model response. It exists before Send and is navigation.
+                  </div>
+                </aside>
+                <div data-message-author-role="assistant">
+                  <div class="ds-markdown">OLD ANSWER</div>
+                </div>
+                <textarea id="editor"></textarea>
+                <button aria-label="Send">Send</button>
+                <div id="loading" aria-busy="false" style="display:none">loading</div>
+                <main id="conversation"></main>
+            """.trimIndent(),
+            script = """
+                var input = document.getElementById('editor');
+                var button = document.querySelector('button');
+                var loading = document.getElementById('loading');
+                var conversation = document.getElementById('conversation');
+                button.addEventListener('click', function(){
+                  var value = input.value || '';
+                  var user = document.createElement('div');
+                  user.setAttribute('data-role', 'user');
+                  user.textContent = value;
+                  conversation.appendChild(user);
+                  loading.style.display = 'block';
+                  loading.setAttribute('aria-busy', 'true');
+                  setTimeout(function(){
+                    var assistant = document.createElement('div');
+                    assistant.setAttribute('data-message-author-role', 'assistant');
+                    assistant.innerHTML = '<div class="ds-markdown"><h2>Fresh result</h2>' +
+                      '<p>Correct answer</p><pre><code class="language-kotlin">val x = 1</code></pre>' +
+                      '<ul><li>A</li><li>B</li></ul></div>';
+                    conversation.appendChild(assistant);
+                    loading.style.display = 'none';
+                    loading.setAttribute('aria-busy', 'false');
+                  }, 300);
+                });
+            """.trimIndent()
+        )
+
+        val result = runAutomation("deepseek", fixture, "new question", 9_000L)
+        assertTrue(result.detail, result.success)
+        assertTrue(result.response.contains("## Fresh result"))
+        assertTrue(result.response.contains("Correct answer"))
+        assertTrue(result.response.contains("```kotlin"))
+        assertTrue(result.response.contains("val x = 1"))
+        assertTrue(result.response.contains("- A"))
+        assertFalse(result.response.contains("SIDEBAR CHROME"))
+        assertFalse(result.response.contains("OLD ANSWER"))
+    }
+
+    @Test
+    fun streamingPauseDoesNotReturnPartialAssistantReply() {
+        val fixture = createHtmlFixture(
+            baseUrl = "https://chat.deepseek.com/",
+            bodyHtml = """
+                <textarea id="editor"></textarea>
+                <button aria-label="Send">Send</button>
+                <div id="loading" aria-busy="false" style="display:none">loading</div>
+                <main id="conversation">
+                  <div data-message-author-role="assistant" id="response"></div>
+                </main>
+            """.trimIndent(),
+            script = """
+                var input = document.getElementById('editor');
+                var button = document.querySelector('button');
+                var loading = document.getElementById('loading');
+                var response = document.getElementById('response');
+                var conversation = document.getElementById('conversation');
+                button.addEventListener('click', function(){
+                  var user = document.createElement('div');
+                  user.setAttribute('data-role', 'user');
+                  user.textContent = input.value || '';
+                  conversation.insertBefore(user, response);
+                  loading.style.display = 'block';
+                  loading.setAttribute('aria-busy', 'true');
+                  response.textContent = 'first chunk';
+                  setTimeout(function(){ response.textContent = 'first chunk final chunk'; }, 2200);
+                  setTimeout(function(){
+                    loading.style.display = 'none';
+                    loading.setAttribute('aria-busy', 'false');
+                  }, 2500);
+                });
+            """.trimIndent()
+        )
+
+        val result = runAutomation("deepseek", fixture, "stream please", 10_000L)
+        assertTrue(result.detail, result.success)
+        assertEquals("first chunk final chunk", result.response.trim())
+    }
+
+    private fun runAutomation(
+        platformId: String,
+        webView: WebView,
+        message: String,
+        timeoutMs: Long
+    ): WebAutomationResult {
+        val terminal = CountDownLatch(1)
+        val captured = AtomicReference<WebAutomationResult>()
+        onMain {
+            JsInjector.sendAndAwaitReply(
+                platformId = platformId,
+                webView = webView,
+                message = message,
+                timeoutMs = timeoutMs
+            ) { result ->
+                captured.set(result)
+                terminal.countDown()
+            }
+        }
+        assertTrue("Automation did not finish in time", terminal.await(timeoutMs + 6_000L, TimeUnit.MILLISECONDS))
+        return captured.get()
+    }
+
+    private fun createHtmlFixture(
+        baseUrl: String,
+        bodyHtml: String,
+        script: String
+    ): WebView {
+        val html = """
+            <!doctype html>
+            <html>
+              <head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+              <body>
+                $bodyHtml
+                <script>
+                  (function(){
+                    $script
+                  })();
+                </script>
+              </body>
+            </html>
+        """.trimIndent()
+        return createWebView(baseUrl, html)
+    }
+
     private fun createFixture(
         baseUrl: String,
         inputHtml: String,
@@ -153,8 +298,6 @@ class PipelineWebViewInstrumentedTest {
         loadingHtml: String,
         prefix: String
     ): WebView {
-        val loaded = CountDownLatch(1)
-        val holder = AtomicReference<WebView>()
         val html = """
             <!doctype html>
             <html>
@@ -186,9 +329,29 @@ class PipelineWebViewInstrumentedTest {
             </html>
         """.trimIndent()
 
+        return createWebView(baseUrl, html)
+    }
+
+    private fun createWebView(baseUrl: String, html: String): WebView {
+        val loaded = CountDownLatch(1)
+        val holder = AtomicReference<WebView>()
         onMain {
             val webView = WebView(instrumentation.targetContext).apply {
                 settings.javaScriptEnabled = true
+                addJavascriptInterface(object {
+                    @JavascriptInterface
+                    fun onReplyForRequest(requestId: String, content: String) {
+                        Handler(Looper.getMainLooper()).post {
+                            ReplyBridge.deliver(requestId, content)
+                        }
+                    }
+
+                    @JavascriptInterface
+                    fun onReply(content: String) = Unit
+
+                    @JavascriptInterface
+                    fun onStatus(message: String) = Unit
+                }, "Android")
                 layoutParams = android.view.ViewGroup.LayoutParams(1080, 1920)
                 measure(
                     View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
