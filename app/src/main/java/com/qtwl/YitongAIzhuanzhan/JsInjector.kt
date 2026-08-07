@@ -5,6 +5,7 @@ import android.os.Looper
 import android.webkit.WebView
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Result of one complete web-AI interaction: ready -> fill -> send -> stable reply. */
@@ -15,11 +16,13 @@ data class WebAutomationResult(
     val response: String = ""
 )
 
-class AutomationHandle internal constructor() {
+class AutomationHandle internal constructor(
+    private val onCancel: () -> Unit = {}
+) {
     private val cancelled = AtomicBoolean(false)
 
     fun cancel() {
-        cancelled.set(true)
+        if (cancelled.compareAndSet(false, true)) onCancel()
     }
 
     internal fun isCancelled(): Boolean = cancelled.get()
@@ -46,6 +49,10 @@ object JsInjector {
     private const val READY_TIMEOUT_MS = 45_000L
     private const val POLL_INTERVAL_MS = 900L
     private const val REQUIRED_STABLE_POLLS = 3
+    private const val REQUIRED_STABLE_POLLS_WHILE_LOADING = 10
+
+    @Volatile
+    private var slateFillerSource: String? = null
 
     fun sendAndAwaitReply(
         platformId: String,
@@ -55,13 +62,19 @@ object JsInjector {
         callback: (WebAutomationResult) -> Unit
     ): AutomationHandle {
         val platform = AiPlatformRegistry.get(platformId) ?: AiPlatformRegistry.generic()
-        val handle = AutomationHandle()
+        val requestId = UUID.randomUUID().toString()
+        val handle = AutomationHandle {
+            ReplyBridge.unregister(requestId)
+            cancelReplyWatcher(webView, requestId)
+        }
         val finished = AtomicBoolean(false)
         val deadline = System.currentTimeMillis() + timeoutMs
 
         fun finish(result: WebAutomationResult) {
-            if (!handle.isCancelled() && finished.compareAndSet(false, true)) {
-                callback(result)
+            if (finished.compareAndSet(false, true)) {
+                ReplyBridge.unregister(requestId)
+                cancelReplyWatcher(webView, requestId)
+                if (!handle.isCancelled()) callback(result)
             }
         }
 
@@ -95,48 +108,91 @@ object JsInjector {
                         return@captureSnapshot
                     }
 
-                    evaluateJson(webView, buildFillScript(platform, message), handle) { fill ->
-                        if (fill?.optBoolean("success", false) != true) {
+                    ReplyBridge.register(requestId) { content ->
+                        val reply = content.trim()
+                        if (reply.isNotBlank() && reply != message.trim()) {
+                            finish(
+                                WebAutomationResult(
+                                    success = true,
+                                    stage = "complete",
+                                    detail = "Semantically captured reply from ${platform.displayName}",
+                                    response = reply
+                                )
+                            )
+                        }
+                    }
+
+                    armReplyWatcher(
+                        platform = platform,
+                        webView = webView,
+                        handle = handle,
+                        requestId = requestId,
+                        baseline = baseline,
+                        sentMessage = message,
+                        timeoutMs = timeoutMs
+                    ) { watcherArmed ->
+                        if (!watcherArmed) {
                             finish(
                                 WebAutomationResult(
                                     success = false,
-                                    stage = "fill",
-                                    detail = fill?.optString("error")
-                                        ?.takeIf { it.isNotBlank() }
-                                        ?: "The message input could not be filled"
+                                    stage = "watcher",
+                                    detail = "Could not arm the semantic reply watcher for ${platform.displayName}"
                                 )
                             )
-                            return@evaluateJson
+                            return@armReplyWatcher
                         }
 
-                        mainHandler.postDelayed({
-                            if (handle.isCancelled()) return@postDelayed
-                            evaluateJson(webView, buildSubmitScript(platform), handle) { send ->
-                                if (send?.optBoolean("success", false) != true) {
-                                    finish(
-                                        WebAutomationResult(
-                                            success = false,
-                                            stage = "send",
-                                            detail = send?.optString("error")
-                                                ?.takeIf { it.isNotBlank() }
-                                                ?: "No working send control was found"
-                                        )
+                        evaluateJson(webView, buildFillScript(platform, message), handle) { fill ->
+                            if (fill?.optBoolean("success", false) != true) {
+                                finish(
+                                    WebAutomationResult(
+                                        success = false,
+                                        stage = "fill",
+                                        detail = fill?.optString("error")
+                                            ?.takeIf { it.isNotBlank() }
+                                            ?: "The message input could not be filled"
                                     )
-                                    return@evaluateJson
-                                }
-
-                                pollForStableReply(
-                                    platform = platform,
-                                    webView = webView,
-                                    handle = handle,
-                                    deadline = deadline,
-                                    baseline = baseline,
-                                    sentMessage = message,
-                                    lastText = "",
-                                    stablePolls = 0
-                                ) { result -> finish(result) }
+                                )
+                                return@evaluateJson
                             }
-                        }, platform.afterFillDelayMs)
+
+                            mainHandler.postDelayed({
+                                if (handle.isCancelled()) return@postDelayed
+                                evaluateJson(webView, buildSubmitScript(platform), handle) { send ->
+                                    if (send?.optBoolean("success", false) != true) {
+                                        finish(
+                                            WebAutomationResult(
+                                                success = false,
+                                                stage = "send",
+                                                detail = send?.optString("error")
+                                                    ?.takeIf { it.isNotBlank() }
+                                                    ?: "No working send control was found"
+                                            )
+                                        )
+                                        return@evaluateJson
+                                    }
+
+                                    // The JavaScript MutationObserver is the only success path.
+                                    // A final snapshot is used only to make timeout failures useful.
+                                    val remainingMs = (deadline - System.currentTimeMillis()).coerceAtLeast(1_000L)
+                                    mainHandler.postDelayed({
+                                        if (handle.isCancelled() || finished.get()) return@postDelayed
+                                        captureSnapshot(platform, webView, handle) { snapshot ->
+                                            if (handle.isCancelled() || finished.get()) return@captureSnapshot
+                                            val partial = snapshot?.text.orEmpty().trim()
+                                            finish(
+                                                WebAutomationResult(
+                                                    success = false,
+                                                    stage = "reply",
+                                                    detail = "No high-confidence completed assistant reply was detected from ${platform.displayName} before timeout (${snapshot?.url.orEmpty()})",
+                                                    response = partial.takeIf { it.isNotBlank() && it != message.trim() }.orEmpty()
+                                                )
+                                            )
+                                        }
+                                    }, remainingMs)
+                                }
+                            }, platform.afterFillDelayMs)
+                        }
                     }
                 }
             }
@@ -228,7 +284,12 @@ object JsInjector {
                 (snapshot.count > baseline.count || normalisedReply != baseline.text.trim())
             val nextStable = if (hasNewReply && snapshot.text == lastText) stablePolls + 1 else 0
 
-            if (hasNewReply && !snapshot.loading && nextStable >= REQUIRED_STABLE_POLLS) {
+            val requiredStablePolls = if (snapshot.loading) {
+                REQUIRED_STABLE_POLLS_WHILE_LOADING
+            } else {
+                REQUIRED_STABLE_POLLS
+            }
+            if (hasNewReply && nextStable >= requiredStablePolls) {
                 callback(
                     WebAutomationResult(
                         success = true,
@@ -291,6 +352,59 @@ object JsInjector {
                     )
                 }
             )
+        }
+    }
+
+    private fun armReplyWatcher(
+        platform: AiPlatformDefinition,
+        webView: WebView,
+        handle: AutomationHandle,
+        requestId: String,
+        baseline: ReplySnapshot,
+        sentMessage: String,
+        timeoutMs: Long,
+        callback: (Boolean) -> Unit
+    ) {
+        if (handle.isCancelled()) return
+        val source = loadSlateFiller(webView)
+        if (source == null) {
+            callback(false)
+            return
+        }
+        val options = JSONObject().apply {
+            put("requestId", requestId)
+            put("replySelectors", JSONArray(platform.assistantMessageSelectors))
+            put("loadingSelectors", JSONArray(platform.loadingSelectors))
+            put("baselineCount", baseline.count)
+            put("baselineText", baseline.text)
+            put("sentMessage", sentMessage)
+            put("timeoutMs", timeoutMs)
+        }
+        webView.evaluateJavascript(source) {
+            if (handle.isCancelled()) return@evaluateJavascript
+            val script = "(function(){return window.__watchReply ? window.__watchReply(${options}) : false;})()"
+            webView.evaluateJavascript(script) { raw ->
+                if (handle.isCancelled()) return@evaluateJavascript
+                callback(raw == "true")
+            }
+        }
+    }
+
+    private fun loadSlateFiller(webView: WebView): String? {
+        slateFillerSource?.let { return it }
+        return synchronized(this) {
+            slateFillerSource ?: runCatching {
+                webView.context.assets.open("SlateFiller.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+            }.getOrNull()?.also { slateFillerSource = it }
+        }
+    }
+
+    private fun cancelReplyWatcher(webView: WebView, requestId: String) {
+        val script = "(function(){if(window.__cancelReplyWatcher){window.__cancelReplyWatcher(${JSONObject.quote(requestId)});}})()"
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            runCatching { webView.evaluateJavascript(script, null) }
+        } else {
+            mainHandler.post { runCatching { webView.evaluateJavascript(script, null) } }
         }
     }
 
@@ -459,6 +573,14 @@ object JsInjector {
 (function(){
   try{
     var inputSelectors=$inputs, replySelectors=$replies, loadingSelectors=$loading;
+    var fallbackSelectors=[
+      '[data-role="assistant"]',
+      '[data-message-author-role="assistant"]',
+      '[data-testid*="assistant"]',
+      '[class*="assistant-message"]',
+      '[class*="message-assistant"]',
+      '.ds-markdown', '.qwen-markdown', '.markdown-body', '.prose'
+    ];
     function roots(){
       var result=[document], queue=[document];
       while(queue.length){
@@ -467,47 +589,54 @@ object JsInjector {
       }
       return result;
     }
-    function usable(el){
+    function visible(el){
       if(!el) return false;
-      var style=getComputedStyle(el);
-      return !el.hidden && style.display!=='none' && style.visibility!=='hidden';
+      var style=getComputedStyle(el), rect=el.getBoundingClientRect();
+      return !el.hidden && style.display!=='none' && style.visibility!=='hidden' && rect.width>0 && rect.height>0;
+    }
+    function isUserMessage(el){
+      return !!(el.closest && el.closest(
+        '[data-role="user"],[data-message-author-role="user"],[data-testid*="user"],'+
+        '[class*="user-message"],[class*="message-user"],[class*="human-message"]'
+      ));
+    }
+    function collectElements(selectors){
+      var rs=roots(), elements=[], seen=new Set();
+      for(var s=0;s<selectors.length;s++) for(var r=0;r<rs.length;r++){
+        var nodes=[];
+        try{ nodes=rs[r].querySelectorAll(selectors[s]); }catch(ignore){}
+        for(var n=0;n<nodes.length;n++){
+          var el=nodes[n];
+          if(!seen.has(el) && visible(el) && !isUserMessage(el) &&
+             el.tagName!=='TEXTAREA' && el.tagName!=='INPUT' && !el.isContentEditable){
+            seen.add(el); elements.push(el);
+          }
+        }
+      }
+      elements.sort(function(a,b){
+        if(a===b) return 0;
+        var relation=a.compareDocumentPosition ? a.compareDocumentPosition(b) : 0;
+        if(relation & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if(relation & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        return a.getBoundingClientRect().top-b.getBoundingClientRect().top;
+      });
+      return elements;
     }
     var rs=roots(), inputFound=false, isLoading=false;
     for(var s=0;s<inputSelectors.length;s++) for(var r=0;r<rs.length;r++){
-      var input=rs[r].querySelector(inputSelectors[s]); if(usable(input)) inputFound=true;
+      var input=null; try{ input=rs[r].querySelector(inputSelectors[s]); }catch(ignore){}
+      if(visible(input)) inputFound=true;
     }
     for(var s=0;s<loadingSelectors.length;s++) for(var r=0;r<rs.length;r++){
-      var nodes=rs[r].querySelectorAll(loadingSelectors[s]);
-      for(var n=0;n<nodes.length;n++) if(usable(nodes[n])) isLoading=true;
+      var nodes=[]; try{ nodes=rs[r].querySelectorAll(loadingSelectors[s]); }catch(ignore){}
+      for(var n=0;n<nodes.length;n++) if(visible(nodes[n])) isLoading=true;
     }
-    var messages=[], seen=new Set();
-    for(var s=0;s<replySelectors.length;s++) for(var r=0;r<rs.length;r++){
-      var nodes=rs[r].querySelectorAll(replySelectors[s]);
-      for(var n=0;n<nodes.length;n++){
-        var el=nodes[n]; if(!usable(el)) continue;
-        if(el.tagName==='TEXTAREA' || el.tagName==='INPUT' || el.isContentEditable) continue;
-        if(el.closest && el.closest("[data-role='user'],[data-message-author-role='user'],[data-testid*='user'],[class*='user-message'],[class*='message-user']")) continue;
-        var text=(el.innerText || el.textContent || '').replace(/\u00a0/g,' ').trim();
-        if(text && !seen.has(text)){ seen.add(text); messages.push(text); }
-      }
-    }
-    if(messages.length === 0){
-      var walker=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      var pageTexts=[];
-      var node;
-      while(node=walker.nextNode()){
-        var p=node.parentElement;
-        if(!p) continue;
-        if(p.tagName==='SCRIPT'||p.tagName==='STYLE'||p.tagName==='NOSCRIPT') continue;
-        var st=getComputedStyle(p);
-        if(st.display==='none'||st.visibility==='hidden') continue;
-        var t=node.textContent.trim();
-        if(t.length>20) pageTexts.push(t);
-      }
-      pageTexts.sort(function(a,b){return b.length-a.length;});
-      for(var i=0;i<Math.min(10,pageTexts.length);i++){
-        if(!seen.has(pageTexts[i])){ seen.add(pageTexts[i]); messages.push(pageTexts[i]); }
-      }
+    var elements=collectElements(replySelectors);
+    if(elements.length===0) elements=collectElements(fallbackSelectors);
+    var messages=[], seenText=new Set();
+    for(var i=0;i<elements.length;i++){
+      var text=(elements[i].innerText || elements[i].textContent || '').replace(/\u00a0/g,' ').trim();
+      if(text && !seenText.has(text)){ seenText.add(text); messages.push(text); }
     }
     var body=(document.body && document.body.innerText || '').toLowerCase();
     return JSON.stringify({
@@ -515,7 +644,7 @@ object JsInjector {
       count: messages.length,
       loading: isLoading,
       inputFound: inputFound,
-      loginLikely: /登录|登錄|sign in|log in|扫码|掃碼|verify your account/.test(body),
+      loginLikely: /登录|登入|sign in|log in|验证码|验证|verify your account/.test(body),
       url: location.href
     });
   }catch(e){ return JSON.stringify({error:String(e),url:location.href}); }
@@ -561,33 +690,48 @@ object JsInjector {
         }
     }
 
-fun autoSendMessage(
-    webView: WebView,
-    message: String,
-    callback: ((Boolean, String) -> Unit)? = null,
-    platformId: String? = null
-) {
-    fun doSend(pid: String) {
-        sendAndAwaitReply(pid, webView, message) { result ->
-            val def = AiPlatformRegistry.get(pid) ?: AiPlatformRegistry.generic()
-            if (result.success) {
-                ChatHistoryManager.saveMessage(webView.context, pid, def.displayName, message, result.response)
-            }
-            callback?.invoke(result.success, if (result.success) result.response else result.detail)
-        }
-    }
-    if (platformId != null) {
-        doSend(platformId)
-    } else {
+    fun autoSendMessage(
+        webView: WebView,
+        message: String,
+        callback: ((Boolean, String) -> Unit)? = null
+    ) {
         webView.evaluateJavascript("(function(){return location.href})()") { rawUrl ->
-            val detected = AiPlatformRegistry.detect(decodeJavascriptValue(rawUrl))
-            doSend(detected.id)
+            val platform = AiPlatformRegistry.detect(decodeJavascriptValue(rawUrl))
+            sendAndAwaitReply(platform.id, webView, message) { result ->
+                callback?.invoke(
+                    result.success,
+                    if (result.success) result.response else result.detail
+                )
+            }
         }
     }
-}
 
     fun extractChat(webView: WebView, callback: ((String) -> Unit)? = null) {
-        injectJs(webView, getExtractScript(), callback)
+        webView.evaluateJavascript("(function(){return location.href})()") { rawUrl ->
+            val platform = AiPlatformRegistry.detect(decodeJavascriptValue(rawUrl))
+            val source = loadSlateFiller(webView)
+            if (source == null) {
+                callback?.invoke("Could not load the semantic extraction engine")
+                return@evaluateJavascript
+            }
+            val options = JSONObject().apply {
+                put("replySelectors", JSONArray(platform.assistantMessageSelectors))
+            }
+            webView.evaluateJavascript(source) {
+                val script = "(function(){return window.__extractBestReply ? window.__extractBestReply(${options}) : JSON.stringify({success:false,error:'Semantic extractor unavailable'});})()"
+                webView.evaluateJavascript(script) { raw ->
+                    val decoded = decodeJavascriptValue(raw)
+                    val json = runCatching { JSONObject(decoded) }.getOrNull()
+                    val result = if (json?.optBoolean("success", false) == true) {
+                        json.optString("markdown").ifBlank { json.optString("text") }
+                    } else {
+                        json?.optString("error")?.takeIf { it.isNotBlank() }
+                            ?: "No assistant reply could be identified on this page"
+                    }
+                    callback?.invoke(result)
+                }
+            }
+        }
     }
 
     // Compatibility entry points retained for existing callers.
