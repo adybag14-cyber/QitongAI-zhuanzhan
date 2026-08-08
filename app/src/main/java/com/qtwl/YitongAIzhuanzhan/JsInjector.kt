@@ -172,8 +172,23 @@ object JsInjector {
                                         return@evaluateJson
                                     }
 
-                                    // The JavaScript MutationObserver is the only success path.
-                                    // A final snapshot is used only to make timeout failures useful.
+                                    // 双通道：语义监控（SlateFiller） + DOM轮询（兜底）
+                                    pollForStableReply(
+                                        platform = platform,
+                                        webView = webView,
+                                        handle = handle,
+                                        deadline = deadline,
+                                        baseline = baseline,
+                                        sentMessage = message,
+                                        lastText = "",
+                                        stablePolls = 0
+                                    ) { result ->
+                                        if (result.success && !finished.get()) {
+                                            finish(result)
+                                        }
+                                    }
+
+                                    // 超时兜底
                                     val remainingMs = (deadline - System.currentTimeMillis()).coerceAtLeast(1_000L)
                                     mainHandler.postDelayed({
                                         if (handle.isCancelled() || finished.get()) return@postDelayed
@@ -771,10 +786,13 @@ object JsInjector {
                 raw.substring(1, raw.length - 1)
                     .replace("\\\"", "\"")
                     .replace("\\n", "\n")
+                    .replace("\\t", "\t")
+                    .replace("\\r", "\r")
                     .replace("\\\\", "\\")
+                    .replace(Regex("\\\\u([0-9a-fA-F]{4})")) {
+                        it.groupValues[1].toInt(16).toChar().toString()
+                    }
             }
-        } else {
-            raw
-        }
+        } else { raw }
     }
 }

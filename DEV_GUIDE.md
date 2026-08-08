@@ -23,6 +23,8 @@
 13. **🏠 双轨Git制 — 测试版提交本地Git，正式版才推远程** — 测试版只 commit 到本地 `.git`，不 `git push`；正式版才 `git push origin` + 打标签 + Release。本地Git作为"测试版存档"，远程Git作为"正式版发布"
 14. **📦 本地Git archive 发布到目录** — 测试通过后，用 `git archive` 导出干净代码到发布目录，供产出比对
 15. **🌐 全程适配语言** — 新增文字/UI/通知/错误提示须同步添加 `values/`（默认中文）、`values-en/`（英文）、`values-zh/`、`values-zh-rCN/`、`values-zh-rTW/`、`values-zh-rHK/` 多语言资源，确保中英及港台繁简全覆盖
+16. **🔢 每次开发必须升级版本号，严禁重复使用** — 无论测试版还是正式版，**每次修改代码（含修复、新功能、文档调整）都必须先递增 versionCode，versionName 同步递增**（测试版 `-N` 每次 +1，正式版去 `-N`）。**禁止重复使用同一个版本号**（重复会导致覆盖安装不生效、系统判定版本未更新或更新不兼容）。每次 `git commit` 前必须先确认 build.gradle.kts 版本号已递增且未与历史重复
+17. **📛 APK 文件名必须统一格式 `AppName-版本号-android.apk`** — 测试版和正式版复制到 sdcard 的 APK 文件名必须统一使用 `AppName-版本号-android.apk` 格式（如 `QitongAI-zhuanzhan-1.0.1-android.apk`、`QitongAI-zhuanzhan-1.0.1-1-android.apk`），**禁止使用 `app-debug.apk` 等无版本号或不同格式的文件名直接安装**，否则 Android 系统会因包签名不一致或文件名差异导致更新不兼容（安装失败或无法覆盖安装）
 ---
 
 ## 1. 版本号规则
@@ -115,15 +117,16 @@ cd /data/data/com.ai.assistance.operit/files/workspace/綦桐AI转站
 ## 4. 安装到设备
 
 ```bash
-# 复制到 sdcard
-cp app/build/outputs/apk/debug/app-debug.apk /sdcard/Download/綦桐AI转站.apk
+# ★★★ 复制到 sdcard（必须带版本号，命名统一为 AppName-版本号-android.apk）★★★
+# 例如：QitongAI-zhuanzhan-1.0.1-android.apk（正式版）/ QitongAI-zhuanzhan-1.0.1-1-android.apk（测试版）
+cp app/build/outputs/apk/debug/app-debug.apk /sdcard/Download/QitongAI-zhuanzhan-版本号-android.apk
 
 # 安装（需先复制到 /data/local/tmp/）
-cp /sdcard/Download/綦桐AI转站.apk /data/local/tmp/app.apk
+cp /sdcard/Download/QitongAI-zhuanzhan-版本号-android.apk /data/local/tmp/app.apk
 chmod 644 /data/local/tmp/app.apk
 pm install -r /data/local/tmp/app.apk
 
-# 验证
+# 验证版本
 dumpsys package com.qtwl.YitongAIzhuanzhan | grep -E 'versionName|versionCode'
 ```
 
@@ -145,7 +148,7 @@ dumpsys package com.qtwl.YitongAIzhuanzhan | grep -E 'versionName|versionCode'
 ① 改版本号 → 1.0.x-N（N递增）
 ② 改代码（对照备份法）
 ③ ./gradlew assembleDebug
-④ 复制APK到sdcard（带版本号）
+④ 复制APK到sdcard（带版本号，命名统一：QitongAI-zhuanzhan-1.0.x-N-android.apk）
 ⑤ 安装到设备
 ⑥ 验证功能
 ⑦ 提交本地Git（不 push 远程）
@@ -160,7 +163,7 @@ dumpsys package com.qtwl.YitongAIzhuanzhan | grep -E 'versionName|versionCode'
 ③ 更新README.md（版本号+更新日志）
 ④ 更新CHANGELOG.md（追加新版本日志）
 ⑤ ./gradlew assembleDebug
-⑥ 复制APK到sdcard（带版本号）
+⑥ 复制APK到sdcard（带版本号，命名统一：QitongAI-zhuanzhan-1.0.x-android.apk）
 ⑦ 安装到设备
 ⑧ 验证功能
 ⑨ 清理备份文件（删.bak）
