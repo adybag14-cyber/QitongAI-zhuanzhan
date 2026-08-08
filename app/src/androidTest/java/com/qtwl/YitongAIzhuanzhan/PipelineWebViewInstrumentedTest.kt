@@ -206,6 +206,25 @@ class PipelineWebViewInstrumentedTest {
     }
 
     @Test
+    fun unicodePromptSurvivesWebViewInjectionAndReplyCaptureExactly() {
+        val fixture = createFixture(
+            baseUrl = "https://www.doubao.com/chat/",
+            inputHtml = "<textarea data-testid='chat_input_input'></textarea>",
+            buttonHtml = "<button id='flow-end-msg-send'>Send</button>",
+            responseHtml = "<div data-testid='message_text_content' id='response'></div>",
+            loadingHtml = "<div class='loading-spinner' id='loading' style='display:none'>loading</div>",
+            prefix = "回声:"
+        )
+        val prompt = "你好，测试中文 🚀 — café — Привет"
+
+        val result = runAutomation("doubao", fixture, prompt, 9_000L)
+
+        assertTrue(result.detail, result.success)
+        assertEquals("回声:$prompt", result.response.trim())
+        assertFalse(result.response.contains("�"))
+    }
+
+    @Test
     fun streamingPauseDoesNotReturnPartialAssistantReply() {
         val fixture = createHtmlFixture(
             baseUrl = "https://chat.deepseek.com/",
