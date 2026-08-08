@@ -182,7 +182,7 @@ class GatewayServer(
         }
     }
 
-    private fun readBody(session: IHTTPSession): String {
+    internal fun readBody(session: IHTTPSession): String {
         // NanoHTTPD 2.3.1 defaults a present Content-Type without an explicit
         // charset to US-ASCII. OpenAI-compatible clients commonly send
         // application/json without charset=UTF-8, which turns raw Chinese

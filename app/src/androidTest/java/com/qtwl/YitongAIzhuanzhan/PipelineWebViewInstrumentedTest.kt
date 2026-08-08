@@ -225,6 +225,70 @@ class PipelineWebViewInstrumentedTest {
     }
 
     @Test
+    fun qwenCurrentAnswerClassPrefixIsCaptured() {
+        val fixture = createFixture(
+            baseUrl = "https://www.qianwen.com/",
+            inputHtml = "<textarea id='editor'></textarea>",
+            buttonHtml = "<button type='submit'>Send</button>",
+            responseHtml = "<div class='message-select-wrapper-answer-live' id='response'></div>",
+            loadingHtml = "<div aria-busy='false' id='loading' style='display:none'>loading</div>",
+            prefix = "Q:"
+        )
+        val prompt = "Qwen current DOM sentinel 你好🚀"
+
+        val result = runAutomation("tongyi", fixture, prompt, 9_000L)
+
+        assertTrue(result.detail, result.success)
+        assertEquals("Q:$prompt", result.response.trim())
+    }
+
+    @Test
+    fun kimiContenteditableReceivesPromptExactlyOnce() {
+        val fixture = createFixture(
+            baseUrl = "https://www.kimi.com/",
+            inputHtml = "<div class='chat-input-editor' role='textbox' contenteditable='true'></div>",
+            buttonHtml = "<button type='submit'>Send</button>",
+            responseHtml = "<div class='segment-assistant'><div class='markdown' id='response'></div></div>",
+            loadingHtml = "<div aria-busy='false' id='loading' style='display:none'>loading</div>",
+            prefix = "K:"
+        )
+        val prompt = "Kimi exactly once 你好🚀"
+
+        val result = runAutomation("kimi", fixture, prompt, 9_000L)
+
+        assertTrue(result.detail, result.success)
+        assertEquals("K:$prompt", result.response.trim())
+        assertFalse(result.response.contains(prompt + prompt))
+    }
+
+    @Test
+    fun visibleLoginModalTerminatesAsAuthInsteadOfReplyTimeout() {
+        val fixture = createHtmlFixture(
+            baseUrl = "https://www.kimi.com/",
+            bodyHtml = """
+                <div class="chat-input-editor" role="textbox" contenteditable="true"></div>
+                <button type="submit">Send</button>
+                <main id="conversation"></main>
+            """.trimIndent(),
+            script = """
+                var button = document.querySelector('button');
+                button.addEventListener('click', function(){
+                  var modal = document.createElement('div');
+                  modal.className = 'login-modal oversea';
+                  modal.textContent = 'Log in to New Chat Continue with Google OR Log in with phone number';
+                  document.body.appendChild(modal);
+                });
+            """.trimIndent()
+        )
+
+        val result = runAutomation("kimi", fixture, "auth gate test", 9_000L)
+
+        assertFalse(result.success)
+        assertEquals("auth", result.stage)
+        assertTrue(result.detail.contains("requires sign-in"))
+    }
+
+    @Test
     fun streamingPauseDoesNotReturnPartialAssistantReply() {
         val fixture = createHtmlFixture(
             baseUrl = "https://chat.deepseek.com/",
